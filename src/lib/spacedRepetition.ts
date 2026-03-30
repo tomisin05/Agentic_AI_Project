@@ -1,114 +1,179 @@
-// Spaced Repetition Algorithm (SM2-like) for optimal learning retention
-// Based on SuperMemo SM2 algorithm with simplifications
+/**
+ * Spaced Repetition System using SM-2 Algorithm
+ * Optimizes flashcard review intervals for long-term retention
+ */
 
-export interface FlashcardData {
+export interface Flashcard {
   id: string;
   front: string;
   back: string;
-  created: Date;
-  lastReviewed?: Date;
-  nextReview: Date;
-  interval: number; // days
-  easeFactor: number; // 1.3 - 2.5+
-  repetitions: number;
-  quality?: number; // 0-5 (last response quality)
-  tags?: string[];
-  source?: 'session-reflection' | 'manual' | 'imported';
-  sessionId?: string;
+  tags: string[];
+  createdAt: number;
+  
+  // SM-2 Algorithm fields
+  interval: number; // Days until next review
+  repetitions: number; // Number of successful reviews
+  easeFactor: number; // Difficulty multiplier (1.3 - 2.5)
+  nextReviewDate: number; // Timestamp
+  lastReviewDate: number; // Timestamp
+  
+  // Card state
+  state: 'new' | 'learning' | 'mature';
+  
+  // Statistics
+  totalReviews: number;
+  correctCount: number;
+  incorrectCount: number;
 }
 
-export interface ReviewResult {
-  quality: number; // 0: total blackout, 1: incorrect but familiar, 2: incorrect easy to recall, 3: correct but difficult, 4: correct after hesitation, 5: perfect
-}
+export type ReviewDifficulty = 0 | 1 | 2 | 3 | 4 | 5;
+// 0: Again (complete blackout)
+// 1: Hard (incorrect but familiar)
+// 2: Good (incorrect, easy to recall)
+// 3: Easy (correct but difficult)
+// 4: Perfect (correct after hesitation)
+// 5: Trivial (perfect recall)
 
-export class SpacedRepetitionScheduler {
-  private static readonly MIN_EASE_FACTOR = 1.3;
-  private static readonly INITIAL_EASE_FACTOR = 2.5;
-  private static readonly INITIAL_INTERVAL = 1;
-
-  static createFlashcard(
-    front: string, 
-    back: string, 
-    tags?: string[], 
-    source?: FlashcardData['source'],
-    sessionId?: string
-  ): FlashcardData {
-    const now = new Date();
+export class SpacedRepetitionSystem {
+  /**
+   * Creates a new flashcard with default SM-2 values
+   */
+  static createCard(front: string, back: string, tags: string[] = []): Flashcard {
+    const now = Date.now();
     return {
-      id: crypto.randomUUID(),
+      id: `card_${now}_${Math.random().toString(36).substr(2, 9)}`,
       front,
       back,
-      created: now,
-      nextReview: new Date(now.getTime() + 24 * 60 * 60 * 1000), // Review tomorrow
-      interval: this.INITIAL_INTERVAL,
-      easeFactor: this.INITIAL_EASE_FACTOR,
+      tags,
+      createdAt: now,
+      interval: 0,
       repetitions: 0,
-      tags: tags || [],
-      source: source || 'manual',
-      sessionId
+      easeFactor: 2.5,
+      nextReviewDate: now,
+      lastReviewDate: 0,
+      state: 'new',
+      totalReviews: 0,
+      correctCount: 0,
+      incorrectCount: 0
     };
   }
 
-  static reviewCard(card: FlashcardData, result: ReviewResult): FlashcardData {
-    const now = new Date();
-    const quality = Math.max(0, Math.min(5, result.quality));
+  /**
+   * Updates card based on review difficulty using SM-2 algorithm
+   */
+  static reviewCard(card: Flashcard, difficulty: ReviewDifficulty): Flashcard {
+    const now = Date.now();
+    const updated = { ...card };
     
-    let { interval, easeFactor, repetitions } = card;
+    updated.totalReviews++;
+    updated.lastReviewDate = now;
 
-    // Update ease factor based on response quality
-    easeFactor = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-    easeFactor = Math.max(this.MIN_EASE_FACTOR, easeFactor);
+    // Map difficulty to quality (0-5 scale for SM-2)
+    const quality = difficulty;
 
-    // Calculate new interval
-    if (quality < 3) {
-      // Poor response - restart the sequence
-      repetitions = 0;
-      interval = this.INITIAL_INTERVAL;
+    // Update statistics
+    if (quality >= 3) {
+      updated.correctCount++;
     } else {
-      repetitions += 1;
-      if (repetitions === 1) {
-        interval = 1;
-      } else if (repetitions === 2) {
-        interval = 6;
-      } else {
-        interval = Math.round(interval * easeFactor);
-      }
+      updated.incorrectCount++;
     }
 
+    // SM-2 Algorithm
+    if (quality < 3) {
+      // Failed - reset to beginning
+      updated.repetitions = 0;
+      updated.interval = 1;
+      updated.state = 'learning';
+    } else {
+      // Successful recall
+      if (updated.repetitions === 0) {
+        updated.interval = 1;
+        updated.state = 'learning';
+      } else if (updated.repetitions === 1) {
+        updated.interval = 6;
+        updated.state = 'learning';
+      } else {
+        updated.interval = Math.round(updated.interval * updated.easeFactor);
+        updated.state = 'mature';
+      }
+      
+      updated.repetitions++;
+    }
+
+    // Update ease factor
+    updated.easeFactor = Math.max(
+      1.3,
+      updated.easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
+    );
+
     // Calculate next review date
-    const nextReview = new Date(now.getTime() + interval * 24 * 60 * 60 * 1000);
+    updated.nextReviewDate = now + updated.interval * 24 * 60 * 60 * 1000;
 
-    return {
-      ...card,
-      lastReviewed: now,
-      nextReview,
-      interval,
-      easeFactor,
-      repetitions,
-      quality
-    };
+    return updated;
   }
 
-  static getDueCards(cards: FlashcardData[]): FlashcardData[] {
-    const now = new Date();
+  /**
+   * Gets cards that are due for review
+   */
+  static getDueCards(cards: Flashcard[]): Flashcard[] {
+    const now = Date.now();
     return cards
-      .filter(card => card.nextReview <= now)
-      .sort((a, b) => a.nextReview.getTime() - b.nextReview.getTime());
+      .filter(card => card.nextReviewDate <= now)
+      .sort((a, b) => a.nextReviewDate - b.nextReviewDate);
   }
 
-  static getNewCards(cards: FlashcardData[], limit = 20): FlashcardData[] {
-    return cards
-      .filter(card => card.repetitions === 0)
-      .sort((a, b) => a.created.getTime() - b.created.getTime())
-      .slice(0, limit);
+  /**
+   * Gets new cards that haven't been reviewed yet
+   */
+  static getNewCards(cards: Flashcard[]): Flashcard[] {
+    return cards.filter(card => card.state === 'new');
   }
 
-  static getCardStats(cards: FlashcardData[]) {
-    const now = new Date();
-    const due = cards.filter(card => card.nextReview <= now).length;
-    const newCards = cards.filter(card => card.repetitions === 0).length;
-    const learning = cards.filter(card => card.repetitions > 0 && card.repetitions < 3).length;
-    const mature = cards.filter(card => card.repetitions >= 3).length;
+  /**
+   * Gets learning cards (in progress)
+   */
+  static getLearningCards(cards: Flashcard[]): Flashcard[] {
+    return cards.filter(card => card.state === 'learning');
+  }
+
+  /**
+   * Gets mature cards (well-learned)
+   */
+  static getMatureCards(cards: Flashcard[]): Flashcard[] {
+    return cards.filter(card => card.state === 'mature');
+  }
+
+  /**
+   * Gets cards by tags
+   */
+  static getCardsByTags(cards: Flashcard[], tags: string[]): Flashcard[] {
+    if (tags.length === 0) return cards;
+    return cards.filter(card => 
+      card.tags.some(tag => tags.includes(tag))
+    );
+  }
+
+  /**
+   * Calculate retention rate for a card
+   */
+  static getRetentionRate(card: Flashcard): number {
+    if (card.totalReviews === 0) return 0;
+    return (card.correctCount / card.totalReviews) * 100;
+  }
+
+  /**
+   * Get overall statistics for a deck
+   */
+  static getDeckStatistics(cards: Flashcard[]) {
+    const now = Date.now();
+    const due = this.getDueCards(cards).length;
+    const newCards = this.getNewCards(cards).length;
+    const learning = this.getLearningCards(cards).length;
+    const mature = this.getMatureCards(cards).length;
+    
+    const totalReviews = cards.reduce((sum, card) => sum + card.totalReviews, 0);
+    const totalCorrect = cards.reduce((sum, card) => sum + card.correctCount, 0);
+    const avgRetention = totalReviews > 0 ? (totalCorrect / totalReviews) * 100 : 0;
 
     return {
       total: cards.length,
@@ -116,127 +181,34 @@ export class SpacedRepetitionScheduler {
       new: newCards,
       learning,
       mature,
-      retention: cards.length > 0 ? ((mature + learning) / cards.length) * 100 : 0
+      avgRetention: Math.round(avgRetention),
+      totalReviews
     };
   }
 
-  static extractFlashcardFromReflection(
-    reflection: string, 
-    topic?: string,
-    sessionId?: string
-  ): FlashcardData | null {
-    // Simple heuristic to extract potential flashcards from reflections
-    // Look for patterns like "What is X? Y" or "X means Y" or key insights
-    
-    const patterns = [
-      /(.+)\?(.+)/g, // Question and answer pattern
-      /(.+)(?:means?|is|are)(.+)/gi, // Definition pattern
-      /(?:key insight|important|remember):?(.+)/gi, // Key insight pattern
-    ];
-
-    for (const pattern of patterns) {
-      const match = reflection.match(pattern);
-      if (match) {
-        const front = match[1]?.trim();
-        const back = match[2]?.trim();
-        
-        if (front && back && front.length > 3 && back.length > 3) {
-          return this.createFlashcard(
-            front,
-            back,
-            topic ? [topic] : ['reflection'],
-            'session-reflection',
-            sessionId
-          );
-        }
-      }
-    }
-
-    // If no clear pattern, create a general reflection card
-    if (reflection.length > 20) {
-      return this.createFlashcard(
-        topic ? `What did you learn about ${topic}?` : 'What was your key insight from this session?',
-        reflection,
-        topic ? [topic, 'reflection'] : ['reflection'],
-        'session-reflection',
-        sessionId
-      );
-    }
-
-    return null;
-  }
-
-  static generateStudyPlan(cards: FlashcardData[], timeAvailable: number): {
-    dueCards: FlashcardData[];
-    newCards: FlashcardData[];
-    reviewTime: number;
-    newTime: number;
-  } {
-    const dueCards = this.getDueCards(cards);
-    const timePerDueCard = 45; // seconds
-    const timePerNewCard = 60; // seconds
-    
-    const dueTime = dueCards.length * timePerDueCard;
-    const remainingTime = Math.max(0, timeAvailable - dueTime);
-    const newCardsCount = Math.floor(remainingTime / timePerNewCard);
-    
-    const newCards = this.getNewCards(cards, newCardsCount);
-
-    return {
-      dueCards,
-      newCards,
-      reviewTime: dueTime,
-      newTime: newCards.length * timePerNewCard
-    };
-  }
-}
-
-// Storage utilities
-export class FlashcardStorage {
-  private static readonly STORAGE_KEY = 'pomodoro-flashcards';
-
-  static saveCards(cards: FlashcardData[]): void {
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(cards));
-    } catch (error) {
-      console.error('Failed to save flashcards:', error);
-    }
-  }
-
-  static loadCards(): FlashcardData[] {
-    try {
-      const stored = localStorage.getItem(this.STORAGE_KEY);
-      if (!stored) return [];
-      
-      const cards = JSON.parse(stored);
-      return cards.map((card: any) => ({
-        ...card,
-        created: new Date(card.created),
-        lastReviewed: card.lastReviewed ? new Date(card.lastReviewed) : undefined,
-        nextReview: new Date(card.nextReview)
-      }));
-    } catch (error) {
-      console.error('Failed to load flashcards:', error);
-      return [];
-    }
-  }
-
-  static exportCards(cards: FlashcardData[]): string {
+  /**
+   * Export cards to JSON
+   */
+  static exportDeck(cards: Flashcard[]): string {
     return JSON.stringify(cards, null, 2);
   }
 
-  static importCards(jsonData: string): FlashcardData[] {
+  /**
+   * Import cards from JSON
+   */
+  static importDeck(json: string): Flashcard[] {
     try {
-      const cards = JSON.parse(jsonData);
-      return cards.map((card: any) => ({
-        ...card,
-        created: new Date(card.created),
-        lastReviewed: card.lastReviewed ? new Date(card.lastReviewed) : undefined,
-        nextReview: new Date(card.nextReview)
-      }));
+      const cards = JSON.parse(json);
+      if (!Array.isArray(cards)) {
+        throw new Error('Invalid deck format');
+      }
+      // Validate card structure
+      return cards.filter(card => 
+        card.id && card.front && card.back
+      );
     } catch (error) {
-      console.error('Failed to import flashcards:', error);
-      throw new Error('Invalid flashcard data format');
+      console.error('Failed to import deck:', error);
+      return [];
     }
   }
 }

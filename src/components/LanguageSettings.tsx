@@ -1,209 +1,133 @@
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Badge } from './ui/badge';
-import { Label } from './ui/label';
-import { toast } from 'sonner@2.0.3';
-import { Globe, Check, Languages } from 'lucide-react';
-import { useTranslation, Language, I18nManager } from '../lib/i18n';
+import { Globe, Check } from 'lucide-react';
+import { useTranslation, SupportedLanguage } from '../lib/i18n';
+import { motion } from 'motion/react';
 
-interface LanguageSettingsProps {
-  onClose?: () => void;
-}
+export function LanguageSettings() {
+  const { language, setLanguage, supportedLanguages, t } = useTranslation();
 
-export function LanguageSettings({ onClose }: LanguageSettingsProps) {
-  const { language, setLanguage, t, availableLanguages } = useTranslation();
-
-  const handleLanguageChange = (newLanguage: Language) => {
-    setLanguage(newLanguage);
-    toast.success(t('notifications.settingsSaved'));
+  const handleLanguageChange = (lang: SupportedLanguage) => {
+    setLanguage(lang);
   };
-
-  const getLanguageStats = () => {
-    // Mock translation completeness - in real app, calculate from actual translations
-    const completeness: Record<Language, number> = {
-      en: 100,
-      es: 85,
-      fr: 75,
-      de: 70,
-      ja: 60,
-      zh: 55,
-      pt: 80,
-      ru: 65,
-    };
-    return completeness;
-  };
-
-  const completeness = getLanguageStats();
 
   return (
-    <div className="max-w-2xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div>
+      <div className="mb-6">
         <div className="flex items-center gap-3">
-          <Globe className="w-8 h-8 text-blue-600" />
+          <div className="p-3 bg-indigo-100 rounded-xl">
+            <Globe className="w-6 h-6 text-indigo-600" />
+          </div>
           <div>
-            <h1 className="text-2xl font-bold">{t('settings.language')}</h1>
-            <p className="text-muted-foreground">Choose your preferred language</p>
+            <h3 className="text-lg font-bold text-gray-900">Select Language</h3>
+            <p className="text-sm text-gray-600">
+              Current: {supportedLanguages.find(l => l.code === language)?.nativeName}
+            </p>
           </div>
         </div>
-        {onClose && (
-          <Button variant="outline" onClick={onClose}>
-            {t('common.close')}
-          </Button>
-        )}
       </div>
 
-      {/* Current Language */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Languages className="w-5 h-5" />
-            Current Language
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <Label htmlFor="language-select">Select Language</Label>
-              <p className="text-sm text-muted-foreground">
-                Choose the language for the interface
-              </p>
-            </div>
-            <Select value={language} onValueChange={handleLanguageChange}>
-              <SelectTrigger id="language-select" className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {availableLanguages.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code}>
-                    <div className="flex items-center gap-2">
-                      <span>{lang.nativeName}</span>
-                      <span className="text-muted-foreground">({lang.name})</span>
-                      {lang.code === language && (
-                        <Check className="w-4 h-4 text-green-500" />
-                      )}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          
-          <div className="text-sm text-muted-foreground">
-            Current: <span className="font-medium">{availableLanguages.find(l => l.code === language)?.nativeName}</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Available Languages */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Available Languages</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3">
-            {availableLanguages.map((lang) => (
-              <div 
-                key={lang.code}
-                className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-colors ${
-                  lang.code === language 
-                    ? 'border-blue-500 bg-blue-50' 
-                    : 'border-border hover:bg-muted/50'
-                }`}
-                onClick={() => handleLanguageChange(lang.code)}
-              >
-                <div className="flex items-center gap-3">
-                  <div>
-                    <div className="font-medium">{lang.nativeName}</div>
-                    <div className="text-sm text-muted-foreground">{lang.name}</div>
+      <div className="grid md:grid-cols-2 gap-4">
+        {supportedLanguages.map((lang) => (
+          <motion.button
+            key={lang.code}
+            onClick={() => handleLanguageChange(lang.code)}
+            className={`p-6 rounded-xl border-2 transition-all text-left ${
+              language === lang.code
+                ? 'border-indigo-500 bg-indigo-50'
+                : 'border-gray-200 hover:border-indigo-300 hover:bg-gray-50'
+            }`}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-4xl">{lang.flag}</span>
+                <div>
+                  <div className="font-bold text-gray-900 text-lg">
+                    {lang.nativeName}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {lang.name}
                   </div>
                 </div>
-                
-                <div className="flex items-center gap-2">
-                  <Badge 
-                    variant={completeness[lang.code] === 100 ? 'default' : 'secondary'}
-                    className="text-xs"
-                  >
-                    {completeness[lang.code]}% complete
-                  </Badge>
-                  {lang.code === language && (
-                    <Check className="w-4 h-4 text-green-500" />
-                  )}
-                </div>
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              
+              {language === lang.code && (
+                <div className="bg-indigo-600 text-white p-2 rounded-full">
+                  <Check className="w-4 h-4" />
+                </div>
+              )}
+            </div>
+          </motion.button>
+        ))}
+      </div>
 
-      {/* Translation Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Translation Information</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Total strings:</span>
-              <span className="font-medium">~200</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Translated languages:</span>
-              <span className="font-medium">{availableLanguages.length}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Fully translated:</span>
-              <span className="font-medium">
-                {Object.values(completeness).filter(c => c === 100).length} languages
-              </span>
-            </div>
+      <div className="mt-8 p-6 bg-gradient-to-r from-indigo-100 to-purple-100 rounded-xl">
+        <h3 className="font-bold text-gray-900 mb-2">📝 Translation Status</h3>
+        <p className="text-sm text-gray-700 mb-4">
+          All supported languages include translations for core features. Some newly added
+          features may display in English until translations are completed.
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="bg-white rounded-lg p-3">
+            <div className="font-semibold text-gray-900 mb-1">Core UI</div>
+            <div className="text-green-600">✓ Complete</div>
           </div>
-          
-          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <strong>Note:</strong> Some languages are partially translated. 
-              English will be used as fallback for missing translations.
-            </p>
+          <div className="bg-white rounded-lg p-3">
+            <div className="font-semibold text-gray-900 mb-1">Timer</div>
+            <div className="text-green-600">✓ Complete</div>
           </div>
-          
-          <div className="mt-4 text-xs text-muted-foreground">
+          <div className="bg-white rounded-lg p-3">
+            <div className="font-semibold text-gray-900 mb-1">Goals</div>
+            <div className="text-green-600">✓ Complete</div>
+          </div>
+          <div className="bg-white rounded-lg p-3">
+            <div className="font-semibold text-gray-900 mb-1">Settings</div>
+            <div className="text-green-600">✓ Complete</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 p-6 bg-blue-50 border border-blue-200 rounded-xl">
+        <div className="flex gap-3">
+          <Globe className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-blue-800">
+            <div className="font-semibold mb-1">Help us translate!</div>
             <p>
-              Want to help translate? Translations are managed through our 
-              community translation platform. Contact us to contribute!
+              If you notice any translation issues or would like to help improve translations,
+              please let us know. We're always working to make StoryStudy accessible to more students
+              around the world.
             </p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Preview Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Preview</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2 text-sm">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <span className="text-muted-foreground">Start button:</span>
-                <span className="ml-2 font-medium">{t('common.start')}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Focus level:</span>
-                <span className="ml-2 font-medium">{t('timer.focusLevel')}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Work session:</span>
-                <span className="ml-2 font-medium">{t('timer.workSession')}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Break time:</span>
-                <span className="ml-2 font-medium">{t('timer.breakTime')}</span>
-              </div>
-            </div>
+      <div className="mt-6 bg-white rounded-2xl shadow-lg p-8">
+        <h3 className="text-xl font-bold text-gray-900 mb-4">Preview</h3>
+        <div className="space-y-4 text-sm">
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <span className="text-gray-600">App Name:</span>
+            <span className="font-semibold text-gray-900">{t('appName')}</span>
           </div>
-        </CardContent>
-      </Card>
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <span className="text-gray-600">Tagline:</span>
+            <span className="font-semibold text-gray-900">{t('tagline')}</span>
+          </div>
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <span className="text-gray-600">Start Session:</span>
+            <span className="font-semibold text-gray-900">{t('startSession')}</span>
+          </div>
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <span className="text-gray-600">Goals:</span>
+            <span className="font-semibold text-gray-900">{t('goals')}</span>
+          </div>
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+            <span className="text-gray-600">Journal:</span>
+            <span className="font-semibold text-gray-900">{t('journal')}</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

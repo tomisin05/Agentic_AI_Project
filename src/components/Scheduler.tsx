@@ -1,627 +1,635 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Calendar } from './ui/calendar';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Badge } from './ui/badge';
-import { Textarea } from './ui/textarea';
-import { Switch } from './ui/switch';
-import { toast } from 'sonner@2.0.3';
-import { 
-  Calendar as CalendarIcon, 
-  Clock, 
-  Plus, 
-  Download, 
-  Repeat,
-  BookOpen,
-  Target,
-  Bell,
-  ExternalLink,
-  Trash2,
-  Edit
-} from 'lucide-react';
+import { Calendar, Clock, Plus, Trash2, Edit2, Download, Bell } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { notificationSystem } from '../lib/notifications';
 
-interface StudySession {
+export interface ScheduledSession {
   id: string;
   title: string;
-  description?: string;
-  startTime: Date;
+  subject: string;
+  description: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM
   duration: number; // minutes
+  pomodoros: number;
   type: 'study' | 'review' | 'project' | 'exam-prep' | 'break';
-  subject?: string;
-  pomodoroCount?: number;
   priority: 'low' | 'medium' | 'high';
-  recurring?: {
-    type: 'daily' | 'weekly' | 'monthly';
-    interval: number;
-    endDate?: Date;
-  };
-  reminders?: number[]; // minutes before session
-  completed?: boolean;
-  created: Date;
+  recurring: 'none' | 'daily' | 'weekly';
+  reminder: number; // minutes before
+  completed: boolean;
+  createdAt: number;
 }
 
-interface SchedulerProps {
-  onClose?: () => void;
-  onScheduleSession?: (session: StudySession) => void;
-}
+const SESSION_TYPES = [
+  { value: 'study', label: 'Study', color: 'bg-blue-100 text-blue-700', icon: '📚' },
+  { value: 'review', label: 'Review', color: 'bg-purple-100 text-purple-700', icon: '🔍' },
+  { value: 'project', label: 'Project', color: 'bg-green-100 text-green-700', icon: '🎯' },
+  { value: 'exam-prep', label: 'Exam Prep', color: 'bg-red-100 text-red-700', icon: '📝' },
+  { value: 'break', label: 'Break', color: 'bg-yellow-100 text-yellow-700', icon: '☕' }
+];
 
-export function Scheduler({ onClose, onScheduleSession }: SchedulerProps) {
-  const [sessions, setSessions] = useState<StudySession[]>([]);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+const PRIORITY_LEVELS = [
+  { value: 'low', label: 'Low', color: 'text-gray-600' },
+  { value: 'medium', label: 'Medium', color: 'text-yellow-600' },
+  { value: 'high', label: 'High', color: 'text-red-600' }
+];
+
+export function Scheduler() {
+  const [sessions, setSessions] = useState<ScheduledSession[]>([]);
   const [isCreating, setIsCreating] = useState(false);
-  const [editingSession, setEditingSession] = useState<StudySession | null>(null);
-  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('day');
-  
-  const [newSession, setNewSession] = useState<Partial<StudySession>>({
+  const [editingSession, setEditingSession] = useState<ScheduledSession | null>(null);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [reminderTimeouts, setReminderTimeouts] = useState<Map<string, number>>(new Map());
+
+  const [newSession, setNewSession] = useState<Partial<ScheduledSession>>({
     title: '',
-    description: '',
-    startTime: new Date(),
-    duration: 25,
-    type: 'study',
     subject: '',
-    pomodoroCount: 1,
+    description: '',
+    date: new Date().toISOString().split('T')[0],
+    time: '09:00',
+    duration: 25,
+    pomodoros: 1,
+    type: 'study',
     priority: 'medium',
-    reminders: [10, 5]
+    recurring: 'none',
+    reminder: 10,
+    completed: false
   });
 
+  // Load sessions from localStorage
   useEffect(() => {
-    loadSessions();
+    const stored = localStorage.getItem('scheduled-sessions');
+    if (stored) {
+      try {
+        const loadedSessions = JSON.parse(stored);
+        setSessions(loadedSessions);
+        setupReminders(loadedSessions);
+      } catch (error) {
+        console.error('Failed to load sessions:', error);
+      }
+    }
   }, []);
 
-  const loadSessions = () => {
-    try {
-      const stored = localStorage.getItem('pomodoro-scheduled-sessions');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        const sessions = parsed.map((session: any) => ({
-          ...session,
-          startTime: new Date(session.startTime),
-          created: new Date(session.created),
-          recurring: session.recurring ? {
-            ...session.recurring,
-            endDate: session.recurring.endDate ? new Date(session.recurring.endDate) : undefined
-          } : undefined
-        }));
-        setSessions(sessions);
-      }
-    } catch (error) {
-      console.error('Failed to load sessions:', error);
+  // Save sessions to localStorage
+  useEffect(() => {
+    if (sessions.length >= 0) {
+      localStorage.setItem('scheduled-sessions', JSON.stringify(sessions));
     }
-  };
+  }, [sessions]);
 
-  const saveSessions = (updatedSessions: StudySession[]) => {
-    setSessions(updatedSessions);
-    localStorage.setItem('pomodoro-scheduled-sessions', JSON.stringify(updatedSessions));
+  const setupReminders = (sessionsToSetup: ScheduledSession[]) => {
+    // Clear existing timeouts
+    reminderTimeouts.forEach(timeout => clearTimeout(timeout));
+    const newTimeouts = new Map<string, number>();
+
+    sessionsToSetup.forEach(session => {
+      if (session.completed || session.reminder === 0) return;
+
+      const sessionDateTime = new Date(`${session.date}T${session.time}`);
+      const reminderTime = new Date(sessionDateTime.getTime() - session.reminder * 60 * 1000);
+      const now = new Date();
+
+      if (reminderTime > now) {
+        const timeout = window.setTimeout(() => {
+          notificationSystem.showStudyReminder(session.title, session.reminder);
+        }, reminderTime.getTime() - now.getTime());
+
+        newTimeouts.set(session.id, timeout);
+      }
+    });
+
+    setReminderTimeouts(newTimeouts);
   };
 
   const createSession = () => {
-    if (!newSession.title?.trim()) {
-      toast.error('Please enter a session title');
-      return;
-    }
+    if (!newSession.title?.trim()) return;
 
-    const session: StudySession = {
-      id: crypto.randomUUID(),
-      title: newSession.title.trim(),
-      description: newSession.description?.trim() || '',
-      startTime: newSession.startTime || new Date(),
-      duration: newSession.duration || 25,
-      type: newSession.type || 'study',
-      subject: newSession.subject?.trim() || '',
-      pomodoroCount: newSession.pomodoroCount || 1,
-      priority: newSession.priority || 'medium',
-      recurring: newSession.recurring,
-      reminders: newSession.reminders || [10, 5],
+    const session: ScheduledSession = {
+      id: `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      title: newSession.title!,
+      subject: newSession.subject || '',
+      description: newSession.description || '',
+      date: newSession.date!,
+      time: newSession.time!,
+      duration: newSession.duration!,
+      pomodoros: newSession.pomodoros!,
+      type: newSession.type as any,
+      priority: newSession.priority as any,
+      recurring: newSession.recurring as any,
+      reminder: newSession.reminder!,
       completed: false,
-      created: new Date()
+      createdAt: Date.now()
     };
 
     const updatedSessions = [...sessions, session];
-    saveSessions(updatedSessions);
-    
-    // Schedule notifications
-    scheduleNotifications(session);
-    
-    setNewSession({
-      title: '',
-      description: '',
-      startTime: new Date(),
-      duration: 25,
-      type: 'study',
-      subject: '',
-      pomodoroCount: 1,
-      priority: 'medium',
-      reminders: [10, 5]
-    });
-    setIsCreating(false);
-    toast.success('Study session scheduled!');
-    
-    if (onScheduleSession) {
-      onScheduleSession(session);
-    }
+    setSessions(updatedSessions);
+    setupReminders(updatedSessions);
+    resetForm();
   };
 
   const updateSession = () => {
     if (!editingSession) return;
-    
-    const updatedSessions = sessions.map(session => 
-      session.id === editingSession.id ? editingSession : session
+
+    const updatedSessions = sessions.map(s =>
+      s.id === editingSession.id ? editingSession : s
     );
-    saveSessions(updatedSessions);
+    setSessions(updatedSessions);
+    setupReminders(updatedSessions);
     setEditingSession(null);
-    toast.success('Session updated!');
   };
 
-  const deleteSession = (sessionId: string) => {
-    const updatedSessions = sessions.filter(session => session.id !== sessionId);
-    saveSessions(updatedSessions);
-    toast.success('Session deleted');
-  };
-
-  const completeSession = (sessionId: string) => {
-    const updatedSessions = sessions.map(session => 
-      session.id === sessionId ? { ...session, completed: true } : session
-    );
-    saveSessions(updatedSessions);
-    toast.success('Session marked as completed!');
-  };
-
-  const scheduleNotifications = (session: StudySession) => {
-    if (!('Notification' in window) || Notification.permission !== 'granted') {
-      return;
-    }
-
-    session.reminders?.forEach(minutes => {
-      const notificationTime = session.startTime.getTime() - (minutes * 60 * 1000);
-      const now = Date.now();
-      
-      if (notificationTime > now) {
-        setTimeout(() => {
-          new Notification(`Study Session Reminder`, {
-            body: `"${session.title}" starts in ${minutes} minutes`,
-            icon: '/favicon.ico'
-          });
-        }, notificationTime - now);
-      }
-    });
-  };
-
-  const exportToCalendar = (session: StudySession) => {
-    const startTime = session.startTime;
-    const endTime = new Date(startTime.getTime() + session.duration * 60 * 1000);
+  const deleteSession = (id: string) => {
+    const timeout = reminderTimeouts.get(id);
+    if (timeout) clearTimeout(timeout);
     
-    const formatDate = (date: Date) => {
+    const updatedSessions = sessions.filter(s => s.id !== id);
+    setSessions(updatedSessions);
+    
+    const newTimeouts = new Map(reminderTimeouts);
+    newTimeouts.delete(id);
+    setReminderTimeouts(newTimeouts);
+  };
+
+  const toggleComplete = (id: string) => {
+    const updatedSessions = sessions.map(s =>
+      s.id === id ? { ...s, completed: !s.completed } : s
+    );
+    setSessions(updatedSessions);
+  };
+
+  const resetForm = () => {
+    setNewSession({
+      title: '',
+      subject: '',
+      description: '',
+      date: selectedDate,
+      time: '09:00',
+      duration: 25,
+      pomodoros: 1,
+      type: 'study',
+      priority: 'medium',
+      recurring: 'none',
+      reminder: 10,
+      completed: false
+    });
+    setIsCreating(false);
+  };
+
+  const exportToCalendar = (session: ScheduledSession) => {
+    const startDateTime = new Date(`${session.date}T${session.time}`);
+    const endDateTime = new Date(startDateTime.getTime() + session.duration * 60 * 1000);
+
+    const formatICSDate = (date: Date) => {
       return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
     };
 
     const icsContent = `BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:-//Pomodoro Study App//EN
+PRODID:-//StoryStudy//Study Session//EN
 BEGIN:VEVENT
-UID:${session.id}@pomodoro-app.com
-DTSTAMP:${formatDate(new Date())}
-DTSTART:${formatDate(startTime)}
-DTEND:${formatDate(endTime)}
+UID:${session.id}@storystudy.app
+DTSTAMP:${formatICSDate(new Date())}
+DTSTART:${formatICSDate(startDateTime)}
+DTEND:${formatICSDate(endDateTime)}
 SUMMARY:${session.title}
-DESCRIPTION:${session.description || 'Study session'}\\nSubject: ${session.subject || 'General'}\\nPomodoros: ${session.pomodoroCount}\\nPriority: ${session.priority}
-PRIORITY:${session.priority === 'high' ? '1' : session.priority === 'medium' ? '5' : '9'}
+DESCRIPTION:${session.description}\\n\\nSubject: ${session.subject}\\nDuration: ${session.duration} min\\nPomodoros: ${session.pomodoros}
+LOCATION:StoryStudy App
+STATUS:CONFIRMED
 BEGIN:VALARM
-TRIGGER:-PT10M
+TRIGGER:-PT${session.reminder}M
 ACTION:DISPLAY
-DESCRIPTION:Study session starts in 10 minutes
+DESCRIPTION:Reminder: ${session.title} starts in ${session.reminder} minutes
 END:VALARM
 END:VEVENT
 END:VCALENDAR`;
 
     const blob = new Blob([icsContent], { type: 'text/calendar' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${session.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.ics`;
-    link.click();
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${session.title.replace(/\s+/g, '-')}.ics`;
+    a.click();
     URL.revokeObjectURL(url);
-    toast.success('Calendar event exported!');
   };
 
-  const requestNotificationPermission = async () => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        toast.success('Notifications enabled!');
-      }
-    }
-  };
-
-  const getSessionsForDate = (date: Date) => {
-    return sessions.filter(session => {
-      const sessionDate = new Date(session.startTime);
-      return sessionDate.toDateString() === date.toDateString();
-    }).sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
-  };
-
-  const getUpcomingSessions = () => {
-    const now = new Date();
+  const getSessionsForDate = (date: string) => {
     return sessions
-      .filter(session => session.startTime > now && !session.completed)
-      .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
-      .slice(0, 5);
+      .filter(s => s.date === date)
+      .sort((a, b) => a.time.localeCompare(b.time));
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'bg-red-500';
-      case 'medium': return 'bg-yellow-500'; 
-      case 'low': return 'bg-green-500';
-      default: return 'bg-gray-500';
-    }
+  // Helper to format date string to local date without timezone issues
+  const formatDateString = (dateString: string) => {
+    const [year, month, day] = dateString.split('-').map(Number);
+    const date = new Date(year, month - 1, day); // month is 0-indexed
+    return date.toLocaleDateString();
   };
 
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'study': return <BookOpen className="w-4 h-4" />;
-      case 'review': return <Repeat className="w-4 h-4" />;
-      case 'project': return <Target className="w-4 h-4" />;
-      case 'exam-prep': return <BookOpen className="w-4 h-4" />;
-      default: return <Clock className="w-4 h-4" />;
-    }
-  };
+  const upcomingSessions = sessions
+    .filter(s => !s.completed)
+    .filter(s => {
+      const sessionDate = new Date(`${s.date}T${s.time}`);
+      return sessionDate >= new Date();
+    })
+    .sort((a, b) => {
+      const dateA = new Date(`${a.date}T${a.time}`);
+      const dateB = new Date(`${b.date}T${b.time}`);
+      return dateA.getTime() - dateB.getTime();
+    })
+    .slice(0, 5);
 
   const todaySessions = getSessionsForDate(selectedDate);
-  const upcomingSessions = getUpcomingSessions();
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <CalendarIcon className="w-8 h-8 text-blue-600" />
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 p-6">
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Study Scheduler</h1>
-            <p className="text-muted-foreground">Plan and organize your study sessions</p>
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+              📅 Study Scheduler
+            </h1>
+            <p className="text-gray-600">
+              Plan your study sessions and sync with your calendar
+            </p>
           </div>
+          
+          <button
+            onClick={() => setIsCreating(true)}
+            className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:shadow-lg transition-shadow flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Schedule Session
+          </button>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={requestNotificationPermission}>
-            <Bell className="w-4 h-4 mr-2" />
-            Enable Notifications
-          </Button>
-          {onClose && (
-            <Button variant="outline" onClick={onClose}>
-              Close
-            </Button>
-          )}
-        </div>
-      </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Calendar */}
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle>Calendar</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={(date) => date && setSelectedDate(date)}
-              className="rounded-md border"
-            />
-            <Button 
-              onClick={() => setIsCreating(true)} 
-              className="w-full mt-4"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Schedule Session
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Daily Schedule */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>
-                {selectedDate.toLocaleDateString('en-US', { 
-                  weekday: 'long', 
-                  year: 'numeric', 
-                  month: 'long', 
-                  day: 'numeric' 
-                })}
-              </CardTitle>
-              <Badge variant="outline">
-                {todaySessions.length} sessions
-              </Badge>
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Calendar and Today's Sessions */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Date Selector */}
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Select Date</h2>
+                <Calendar className="w-6 h-6 text-blue-600" />
+              </div>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {todaySessions.length > 0 ? (
-                todaySessions.map((session) => (
-                  <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg">
-                    <div className="flex items-start gap-3">
-                      <div className={`w-3 h-3 rounded-full mt-2 ${getPriorityColor(session.priority)}`} />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          {getTypeIcon(session.type)}
-                          <span className="font-medium">{session.title}</span>
-                          {session.subject && (
-                            <Badge variant="secondary">{session.subject}</Badge>
-                          )}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {session.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • 
-                          {session.duration} min • 
-                          {session.pomodoroCount} pomodoro{session.pomodoroCount !== 1 ? 's' : ''}
-                        </div>
-                        {session.description && (
-                          <div className="text-sm text-muted-foreground mt-1">
-                            {session.description}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {!session.completed && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => completeSession(session.id)}
-                        >
-                          Complete
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => exportToCalendar(session)}
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setEditingSession(session)}
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => deleteSession(session.id)}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <CalendarIcon className="w-12 h-12 mx-auto mb-3 opacity-50" />
+
+            {/* Today's Sessions */}
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">
+                Sessions for {formatDateString(selectedDate)}
+              </h2>
+              
+              {todaySessions.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <Clock className="w-16 h-16 mx-auto mb-4 opacity-50" />
                   <p>No sessions scheduled for this date</p>
-                  <Button 
-                    variant="link" 
-                    onClick={() => setIsCreating(true)}
-                    className="mt-2"
-                  >
-                    Schedule your first session
-                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {todaySessions.map((session) => {
+                    const sessionType = SESSION_TYPES.find(t => t.value === session.type);
+                    const priority = PRIORITY_LEVELS.find(p => p.value === session.priority);
+                    
+                    return (
+                      <motion.div
+                        key={session.id}
+                        layout
+                        className={`p-4 border-l-4 ${session.completed ? 'border-green-500 bg-green-50' : 'border-blue-500 bg-white'} rounded-r-xl shadow hover:shadow-md transition-shadow`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-2xl">{sessionType?.icon}</span>
+                              <span className="font-bold text-gray-900">{session.title}</span>
+                              {session.priority === 'high' && (
+                                <span className="px-2 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-full">
+                                  HIGH PRIORITY
+                                </span>
+                              )}
+                            </div>
+                            
+                            <div className="text-sm text-gray-600 space-y-1">
+                              <div>⏰ {session.time} • {session.duration} min • {session.pomodoros} pomodoros</div>
+                              {session.subject && <div>📚 {session.subject}</div>}
+                              {session.description && <div className="text-xs">{session.description}</div>}
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => toggleComplete(session.id)}
+                              className={`p-2 rounded-lg transition-colors ${session.completed ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                            >
+                              {session.completed ? '✓' : '○'}
+                            </button>
+                            <button
+                              onClick={() => exportToCalendar(session)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setEditingSession(session)}
+                              className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => deleteSession(session.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
                 </div>
               )}
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
 
-      {/* Upcoming Sessions */}
-      {upcomingSessions.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Upcoming Sessions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {upcomingSessions.map((session) => (
-                <div key={session.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    {getTypeIcon(session.type)}
-                    <div>
-                      <span className="font-medium">{session.title}</span>
-                      {session.subject && (
-                        <Badge variant="outline" className="ml-2">{session.subject}</Badge>
-                      )}
-                    </div>
+          {/* Upcoming Sessions */}
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">
+                📌 Upcoming Sessions
+              </h2>
+              
+              {upcomingSessions.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <p className="text-sm">No upcoming sessions</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {upcomingSessions.map((session) => {
+                    const sessionType = SESSION_TYPES.find(t => t.value === session.type);
+                    
+                    return (
+                      <div
+                        key={session.id}
+                        className="p-3 bg-gray-50 rounded-xl border border-gray-200"
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className="text-lg">{sessionType?.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 truncate text-sm">
+                              {session.title}
+                            </div>
+                            <div className="text-xs text-gray-600">
+                              {formatDateString(session.date)} • {session.time}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Stats */}
+            <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl shadow-lg p-6 text-white">
+              <h3 className="text-lg font-bold mb-4">This Week</h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span>Total Sessions</span>
+                  <span className="text-2xl font-bold">{sessions.filter(s => {
+                    const sessionDate = new Date(s.date);
+                    const now = new Date();
+                    const weekStart = new Date(now.setDate(now.getDate() - now.getDay()));
+                    return sessionDate >= weekStart;
+                  }).length}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Completed</span>
+                  <span className="text-2xl font-bold">{sessions.filter(s => {
+                    const sessionDate = new Date(s.date);
+                    const now = new Date();
+                    const weekStart = new Date(now.setDate(now.getDate() - now.getDay()));
+                    return sessionDate >= weekStart && s.completed;
+                  }).length}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Create/Edit Session Modal */}
+        {(isCreating || editingSession) && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white rounded-2xl p-8 max-w-2xl w-full shadow-2xl my-8"
+            >
+              <h2 className="text-2xl font-bold mb-6 text-gray-900">
+                {editingSession ? 'Edit Session' : 'Schedule New Session'}
+              </h2>
+              
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Session Title *
+                    </label>
+                    <input
+                      type="text"
+                      value={editingSession?.title || newSession.title}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, title: e.target.value })
+                        : setNewSession({ ...newSession, title: e.target.value })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="e.g., Study Calculus Chapter 5"
+                    />
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    {session.startTime.toLocaleDateString()} at {' '}
-                    {session.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Subject
+                    </label>
+                    <input
+                      type="text"
+                      value={editingSession?.subject || newSession.subject}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, subject: e.target.value })
+                        : setNewSession({ ...newSession, subject: e.target.value })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Mathematics"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Session Type
+                    </label>
+                    <select
+                      value={editingSession?.type || newSession.type}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, type: e.target.value as any })
+                        : setNewSession({ ...newSession, type: e.target.value as any })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      {SESSION_TYPES.map(type => (
+                        <option key={type.value} value={type.value}>
+                          {type.icon} {type.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Date
+                    </label>
+                    <input
+                      type="date"
+                      value={editingSession?.date || newSession.date}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, date: e.target.value })
+                        : setNewSession({ ...newSession, date: e.target.value })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Time
+                    </label>
+                    <input
+                      type="time"
+                      value={editingSession?.time || newSession.time}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, time: e.target.value })
+                        : setNewSession({ ...newSession, time: e.target.value })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Duration (minutes)
+                    </label>
+                    <input
+                      type="number"
+                      value={editingSession?.duration || newSession.duration}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, duration: parseInt(e.target.value) })
+                        : setNewSession({ ...newSession, duration: parseInt(e.target.value) })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      min="1"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Pomodoros
+                    </label>
+                    <input
+                      type="number"
+                      value={editingSession?.pomodoros || newSession.pomodoros}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, pomodoros: parseInt(e.target.value) })
+                        : setNewSession({ ...newSession, pomodoros: parseInt(e.target.value) })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      min="1"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Priority
+                    </label>
+                    <select
+                      value={editingSession?.priority || newSession.priority}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, priority: e.target.value as any })
+                        : setNewSession({ ...newSession, priority: e.target.value as any })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      {PRIORITY_LEVELS.map(priority => (
+                        <option key={priority.value} value={priority.value}>
+                          {priority.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Reminder (minutes before)
+                    </label>
+                    <select
+                      value={editingSession?.reminder || newSession.reminder}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, reminder: parseInt(e.target.value) })
+                        : setNewSession({ ...newSession, reminder: parseInt(e.target.value) })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="0">No reminder</option>
+                      <option value="5">5 minutes</option>
+                      <option value="10">10 minutes</option>
+                      <option value="15">15 minutes</option>
+                      <option value="30">30 minutes</option>
+                    </select>
+                  </div>
+                  
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Description
+                    </label>
+                    <textarea
+                      value={editingSession?.description || newSession.description}
+                      onChange={(e) => editingSession
+                        ? setEditingSession({ ...editingSession, description: e.target.value })
+                        : setNewSession({ ...newSession, description: e.target.value })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                      rows={3}
+                      placeholder="Additional notes about this session..."
+                    />
                   </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Create Session Dialog */}
-      <Dialog open={isCreating} onOpenChange={setIsCreating}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Schedule Study Session</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="title" className="text-right">Title</Label>
-              <Input
-                id="title"
-                value={newSession.title || ''}
-                onChange={(e) => setNewSession({ ...newSession, title: e.target.value })}
-                className="col-span-3"
-                placeholder="Study session title..."
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="subject" className="text-right">Subject</Label>
-              <Input
-                id="subject"
-                value={newSession.subject || ''}
-                onChange={(e) => setNewSession({ ...newSession, subject: e.target.value })}
-                className="col-span-3"
-                placeholder="Mathematics, Biology, etc."
-              />
-            </div>
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="description" className="text-right">Description</Label>
-              <Textarea
-                id="description"
-                value={newSession.description || ''}
-                onChange={(e) => setNewSession({ ...newSession, description: e.target.value })}
-                className="col-span-3"
-                placeholder="Optional description..."
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="datetime" className="text-right">Date & Time</Label>
-              <Input
-                id="datetime"
-                type="datetime-local"
-                value={newSession.startTime ? newSession.startTime.toISOString().slice(0, 16) : ''}
-                onChange={(e) => setNewSession({ ...newSession, startTime: new Date(e.target.value) })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="duration" className="text-right">Duration (min)</Label>
-              <Input
-                id="duration"
-                type="number"
-                value={newSession.duration || 25}
-                onChange={(e) => setNewSession({ ...newSession, duration: parseInt(e.target.value) })}
-                className="col-span-1"
-                min="5"
-                max="240"
-              />
-              <Label htmlFor="pomodoros" className="text-right">Pomodoros</Label>
-              <Input
-                id="pomodoros"
-                type="number"
-                value={newSession.pomodoroCount || 1}
-                onChange={(e) => setNewSession({ ...newSession, pomodoroCount: parseInt(e.target.value) })}
-                className="col-span-1"
-                min="1"
-                max="10"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="type" className="text-right">Type</Label>
-              <Select value={newSession.type} onValueChange={(value: any) => setNewSession({ ...newSession, type: value })}>
-                <SelectTrigger className="col-span-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="study">Study</SelectItem>
-                  <SelectItem value="review">Review</SelectItem>
-                  <SelectItem value="project">Project</SelectItem>
-                  <SelectItem value="exam-prep">Exam Prep</SelectItem>
-                  <SelectItem value="break">Break</SelectItem>
-                </SelectContent>
-              </Select>
-              <Label htmlFor="priority" className="text-right">Priority</Label>
-              <Select value={newSession.priority} onValueChange={(value: any) => setNewSession({ ...newSession, priority: value })}>
-                <SelectTrigger className="col-span-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              </div>
+              
+              <div className="mt-8 flex gap-3">
+                <button
+                  onClick={editingSession ? updateSession : createSession}
+                  className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:shadow-lg transition-shadow"
+                >
+                  {editingSession ? 'Update Session' : 'Schedule Session'}
+                </button>
+                <button
+                  onClick={() => {
+                    setIsCreating(false);
+                    setEditingSession(null);
+                    resetForm();
+                  }}
+                  className="px-6 py-3 bg-gray-200 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setIsCreating(false)}>
-              Cancel
-            </Button>
-            <Button onClick={createSession}>
-              Schedule Session
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Session Dialog */}
-      <Dialog open={!!editingSession} onOpenChange={() => setEditingSession(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Edit Study Session</DialogTitle>
-          </DialogHeader>
-          {editingSession && (
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="edit-title" className="text-right">Title</Label>
-                <Input
-                  id="edit-title"
-                  value={editingSession.title}
-                  onChange={(e) => setEditingSession({ ...editingSession, title: e.target.value })}
-                  className="col-span-3"
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="edit-subject" className="text-right">Subject</Label>
-                <Input
-                  id="edit-subject"
-                  value={editingSession.subject || ''}
-                  onChange={(e) => setEditingSession({ ...editingSession, subject: e.target.value })}
-                  className="col-span-3"
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="edit-datetime" className="text-right">Date & Time</Label>
-                <Input
-                  id="edit-datetime"
-                  type="datetime-local"
-                  value={editingSession.startTime.toISOString().slice(0, 16)}
-                  onChange={(e) => setEditingSession({ ...editingSession, startTime: new Date(e.target.value) })}
-                  className="col-span-3"
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="edit-duration" className="text-right">Duration (min)</Label>
-                <Input
-                  id="edit-duration"
-                  type="number"
-                  value={editingSession.duration}
-                  onChange={(e) => setEditingSession({ ...editingSession, duration: parseInt(e.target.value) })}
-                  className="col-span-1"
-                />
-                <Label htmlFor="edit-priority" className="text-right">Priority</Label>
-                <Select value={editingSession.priority} onValueChange={(value: any) => setEditingSession({ ...editingSession, priority: value })}>
-                  <SelectTrigger className="col-span-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setEditingSession(null)}>
-              Cancel
-            </Button>
-            <Button onClick={updateSession}>
-              Update Session
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        )}
+      </div>
     </div>
   );
 }

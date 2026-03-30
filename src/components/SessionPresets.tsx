@@ -1,363 +1,432 @@
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Settings, Clock, Coffee, Plus, Edit, Trash2 } from 'lucide-react';
-import { motion, AnimatePresence } from "motion/react";
+import React, { useState, useEffect } from 'react';
+import { Clock, Plus, Edit2, Trash2, Check, ArrowLeft } from 'lucide-react';
+import { motion } from 'motion/react';
+import { useSettings } from '../lib/settingsContext';
+import { Button } from './ui/button';
 
-export interface SessionPreset {
+export interface PomodoroPreset {
   id: string;
   name: string;
-  workDuration: number; // in minutes
-  breakDuration: number; // in minutes
-  longBreakDuration?: number; // in minutes
-  sessionsBeforeLongBreak?: number;
+  workDuration: number; // minutes
+  shortBreakDuration: number; // minutes
+  longBreakDuration: number; // minutes
+  sessionsBeforeLongBreak: number;
   color: string;
-  isDefault?: boolean;
+  isDefault: boolean;
 }
 
-interface SessionPresetsProps {
-  presets: SessionPreset[];
-  currentPreset: SessionPreset;
-  onPresetSelect: (preset: SessionPreset) => void;
-  onPresetCreate: (preset: Omit<SessionPreset, 'id'>) => void;
-  onPresetUpdate: (preset: SessionPreset) => void;
-  onPresetDelete: (presetId: string) => void;
-}
-
-const defaultPresets: SessionPreset[] = [
+const DEFAULT_PRESETS: PomodoroPreset[] = [
   {
     id: 'classic',
     name: 'Classic Pomodoro',
     workDuration: 25,
-    breakDuration: 5,
+    shortBreakDuration: 5,
     longBreakDuration: 15,
     sessionsBeforeLongBreak: 4,
-    color: 'bg-red-500',
+    color: 'from-red-500 to-pink-500',
     isDefault: true
   },
   {
-    id: 'focused',
-    name: 'Deep Focus',
-    workDuration: 45,
-    breakDuration: 15,
-    longBreakDuration: 30,
-    sessionsBeforeLongBreak: 3,
-    color: 'bg-blue-500'
-  },
-  {
-    id: 'sprint',
-    name: 'Quick Sprint',
+    id: 'short-sprint',
+    name: 'Short Sprint',
     workDuration: 15,
-    breakDuration: 3,
+    shortBreakDuration: 3,
     longBreakDuration: 10,
-    sessionsBeforeLongBreak: 6,
-    color: 'bg-green-500'
+    sessionsBeforeLongBreak: 4,
+    color: 'from-blue-500 to-cyan-500',
+    isDefault: true
   },
   {
-    id: 'extended',
-    name: 'Extended Study',
-    workDuration: 60,
-    breakDuration: 20,
-    longBreakDuration: 45,
-    sessionsBeforeLongBreak: 2,
-    color: 'bg-purple-500'
+    id: 'deep-work',
+    name: 'Deep Work',
+    workDuration: 50,
+    shortBreakDuration: 10,
+    longBreakDuration: 20,
+    sessionsBeforeLongBreak: 3,
+    color: 'from-purple-500 to-indigo-500',
+    isDefault: true
+  },
+  {
+    id: 'quick-study',
+    name: 'Quick Study',
+    workDuration: 10,
+    shortBreakDuration: 2,
+    longBreakDuration: 5,
+    sessionsBeforeLongBreak: 6,
+    color: 'from-green-500 to-emerald-500',
+    isDefault: true
   }
 ];
 
-export function SessionPresets({ 
-  presets, 
-  currentPreset, 
-  onPresetSelect, 
-  onPresetCreate, 
-  onPresetUpdate, 
-  onPresetDelete 
-}: SessionPresetsProps) {
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [editingPreset, setEditingPreset] = useState<SessionPreset | null>(null);
-  const [formData, setFormData] = useState({
+interface SessionPresetsProps {
+  onSelectPreset?: (preset: PomodoroPreset) => void;
+  currentPresetId?: string;
+  onBack?: () => void;
+}
+
+export function SessionPresets({ onSelectPreset, currentPresetId, onBack }: SessionPresetsProps) {
+  const { currentPreset, setCurrentPreset } = useSettings();
+  const [presets, setPresets] = useState<PomodoroPreset[]>(DEFAULT_PRESETS);
+  const [isCreating, setIsCreating] = useState(false);
+  const [editingPreset, setEditingPreset] = useState<PomodoroPreset | null>(null);
+  const [newPreset, setNewPreset] = useState<Partial<PomodoroPreset>>({
     name: '',
     workDuration: 25,
-    breakDuration: 5,
+    shortBreakDuration: 5,
     longBreakDuration: 15,
     sessionsBeforeLongBreak: 4,
-    color: 'bg-blue-500'
+    color: 'from-blue-500 to-purple-500'
   });
 
-  const allPresets = [...defaultPresets, ...presets];
-  const colors = [
-    'bg-red-500', 'bg-blue-500', 'bg-green-500', 'bg-purple-500',
-    'bg-orange-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'
-  ];
+  // Load custom presets from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem('pomodoro-presets');
+    if (stored) {
+      try {
+        const customPresets = JSON.parse(stored);
+        setPresets([...DEFAULT_PRESETS, ...customPresets]);
+      } catch (error) {
+        console.error('Failed to load presets:', error);
+      }
+    }
+  }, []);
+
+  // Save custom presets to localStorage
+  const saveCustomPresets = (allPresets: PomodoroPreset[]) => {
+    const customPresets = allPresets.filter(p => !p.isDefault);
+    localStorage.setItem('pomodoro-presets', JSON.stringify(customPresets));
+  };
+
+  const createPreset = () => {
+    if (!newPreset.name?.trim()) return;
+
+    const preset: PomodoroPreset = {
+      id: `preset_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: newPreset.name!,
+      workDuration: newPreset.workDuration!,
+      shortBreakDuration: newPreset.shortBreakDuration!,
+      longBreakDuration: newPreset.longBreakDuration!,
+      sessionsBeforeLongBreak: newPreset.sessionsBeforeLongBreak!,
+      color: newPreset.color!,
+      isDefault: false
+    };
+
+    const updatedPresets = [...presets, preset];
+    setPresets(updatedPresets);
+    saveCustomPresets(updatedPresets);
+    resetForm();
+  };
+
+  const updatePreset = () => {
+    if (!editingPreset) return;
+
+    const updatedPresets = presets.map(p =>
+      p.id === editingPreset.id ? editingPreset : p
+    );
+    setPresets(updatedPresets);
+    saveCustomPresets(updatedPresets);
+    setEditingPreset(null);
+  };
+
+  const deletePreset = (id: string) => {
+    const preset = presets.find(p => p.id === id);
+    if (preset?.isDefault) return; // Can't delete default presets
+
+    const updatedPresets = presets.filter(p => p.id !== id);
+    setPresets(updatedPresets);
+    saveCustomPresets(updatedPresets);
+  };
 
   const resetForm = () => {
-    setFormData({
+    setNewPreset({
       name: '',
       workDuration: 25,
-      breakDuration: 5,
+      shortBreakDuration: 5,
       longBreakDuration: 15,
       sessionsBeforeLongBreak: 4,
-      color: 'bg-blue-500'
+      color: 'from-blue-500 to-purple-500'
     });
+    setIsCreating(false);
   };
 
-  const handleCreatePreset = () => {
-    if (!formData.name.trim()) return;
-    
-    onPresetCreate({
-      name: formData.name,
-      workDuration: formData.workDuration,
-      breakDuration: formData.breakDuration,
-      longBreakDuration: formData.longBreakDuration,
-      sessionsBeforeLongBreak: formData.sessionsBeforeLongBreak,
-      color: formData.color
-    });
-    
-    setIsCreateDialogOpen(false);
-    resetForm();
-  };
-
-  const handleUpdatePreset = () => {
-    if (!editingPreset || !formData.name.trim()) return;
-    
-    onPresetUpdate({
-      ...editingPreset,
-      name: formData.name,
-      workDuration: formData.workDuration,
-      breakDuration: formData.breakDuration,
-      longBreakDuration: formData.longBreakDuration,
-      sessionsBeforeLongBreak: formData.sessionsBeforeLongBreak,
-      color: formData.color
-    });
-    
-    setEditingPreset(null);
-    resetForm();
-  };
-
-  const startEdit = (preset: SessionPreset) => {
-    setEditingPreset(preset);
-    setFormData({
-      name: preset.name,
-      workDuration: preset.workDuration,
-      breakDuration: preset.breakDuration,
-      longBreakDuration: preset.longBreakDuration || 15,
-      sessionsBeforeLongBreak: preset.sessionsBeforeLongBreak || 4,
-      color: preset.color
-    });
-  };
-
-  const PresetForm = () => (
-    <div className="space-y-4">
-      <div>
-        <Label htmlFor="name">Preset Name</Label>
-        <Input
-          id="name"
-          value={formData.name}
-          onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-          placeholder="My Custom Preset"
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="work">Work Duration (min)</Label>
-          <Input
-            id="work"
-            type="number"
-            min="5"
-            max="120"
-            value={formData.workDuration}
-            onChange={(e) => setFormData(prev => ({ ...prev, workDuration: parseInt(e.target.value) || 25 }))}
-          />
-        </div>
-        <div>
-          <Label htmlFor="break">Break Duration (min)</Label>
-          <Input
-            id="break"
-            type="number"
-            min="1"
-            max="30"
-            value={formData.breakDuration}
-            onChange={(e) => setFormData(prev => ({ ...prev, breakDuration: parseInt(e.target.value) || 5 }))}
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="longbreak">Long Break (min)</Label>
-          <Input
-            id="longbreak"
-            type="number"
-            min="5"
-            max="60"
-            value={formData.longBreakDuration}
-            onChange={(e) => setFormData(prev => ({ ...prev, longBreakDuration: parseInt(e.target.value) || 15 }))}
-          />
-        </div>
-        <div>
-          <Label htmlFor="sessions">Sessions Before Long Break</Label>
-          <Input
-            id="sessions"
-            type="number"
-            min="2"
-            max="10"
-            value={formData.sessionsBeforeLongBreak}
-            onChange={(e) => setFormData(prev => ({ ...prev, sessionsBeforeLongBreak: parseInt(e.target.value) || 4 }))}
-          />
-        </div>
-      </div>
-
-      <div>
-        <Label>Color</Label>
-        <div className="flex gap-2 mt-2">
-          {colors.map((color) => (
-            <button
-              key={color}
-              onClick={() => setFormData(prev => ({ ...prev, color }))}
-              className={`w-8 h-8 rounded-full ${color} ${
-                formData.color === color ? 'ring-2 ring-gray-400 ring-offset-2' : ''
-              }`}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="flex gap-2 pt-4">
-        <Button 
-          onClick={editingPreset ? handleUpdatePreset : handleCreatePreset}
-          className="flex-1"
-        >
-          {editingPreset ? 'Update Preset' : 'Create Preset'}
-        </Button>
-        <Button 
-          variant="outline" 
-          onClick={() => {
-            setIsCreateDialogOpen(false);
-            setEditingPreset(null);
-            resetForm();
-          }}
-        >
-          Cancel
-        </Button>
-      </div>
-    </div>
-  );
+  const colorOptions = [
+    'from-red-500 to-pink-500',
+    'from-orange-500 to-amber-500',
+    'from-yellow-500 to-orange-500',
+    'from-green-500 to-emerald-500',
+    'from-blue-500 to-cyan-500',
+    'from-indigo-500 to-blue-500',
+    'from-purple-500 to-indigo-500',
+    'from-pink-500 to-rose-500'
+  ];
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Settings className="w-5 h-5" />
-            Session Presets
-          </CardTitle>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Plus className="w-4 h-4 mr-2" />
-                New Preset
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create Custom Preset</DialogTitle>
-                <DialogDescription>
-                  Create a custom study session preset with your preferred work and break durations.
-                </DialogDescription>
-              </DialogHeader>
-              <PresetForm />
-            </DialogContent>
-          </Dialog>
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-pink-50 p-6">
+      <div className="max-w-6xl mx-auto">
+        {/* Header with Back Button */}
+        {onBack && (
+          <div className="mb-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onBack}
+              className="gap-2"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Study
+            </Button>
+          </div>
+        )}
+        
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+              ⏱️ Session Presets
+            </h1>
+            <p className="text-gray-600">
+              Customize your Pomodoro timer settings
+            </p>
+          </div>
+          
+          <button
+            onClick={() => setIsCreating(true)}
+            className="px-6 py-3 bg-gradient-to-r from-orange-600 to-pink-600 text-white rounded-xl font-semibold hover:shadow-lg transition-shadow flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Create Preset
+          </button>
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-3">
-          <AnimatePresence>
-            {allPresets.map((preset, index) => (
-              <motion.div
-                key={preset.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ delay: index * 0.05 }}
-                className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                  currentPreset.id === preset.id 
-                    ? 'border-blue-500 bg-blue-50' 
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-                onClick={() => onPresetSelect(preset)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-4 h-4 rounded-full ${preset.color}`} />
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{preset.name}</span>
-                        {preset.isDefault && (
-                          <Badge variant="outline" className="text-xs">Default</Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {preset.workDuration}m
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Coffee className="w-3 h-3" />
-                          {preset.breakDuration}m
-                        </span>
-                        {preset.longBreakDuration && (
-                          <span className="text-xs">
-                            {preset.longBreakDuration}m after {preset.sessionsBeforeLongBreak}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
 
-                  {!preset.isDefault && (
-                    <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => startEdit(preset)}
-                      >
-                        <Edit className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onPresetDelete(preset.id)}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
+        {/* Presets Grid */}
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {presets.map((preset) => (
+            <motion.div
+              key={preset.id}
+              layout
+              className={`bg-white rounded-2xl shadow-lg overflow-hidden ${currentPresetId === preset.id ? 'ring-4 ring-blue-500' : ''}`}
+            >
+              <div className={`h-3 bg-gradient-to-r ${preset.color}`} />
+              
+              <div className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-1">
+                      {preset.name}
+                    </h3>
+                    {preset.isDefault && (
+                      <span className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded-full">
+                        Default
+                      </span>
+                    )}
+                  </div>
+                  
+                  {currentPresetId === preset.id && (
+                    <div className="bg-blue-100 text-blue-700 p-2 rounded-full">
+                      <Check className="w-4 h-4" />
                     </div>
                   )}
                 </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+
+                <div className="space-y-3 mb-6">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Work Duration</span>
+                    <span className="font-bold text-gray-900">{preset.workDuration} min</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Short Break</span>
+                    <span className="font-bold text-gray-900">{preset.shortBreakDuration} min</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Long Break</span>
+                    <span className="font-bold text-gray-900">{preset.longBreakDuration} min</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Sessions Before Long Break</span>
+                    <span className="font-bold text-gray-900">{preset.sessionsBeforeLongBreak}</span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setCurrentPreset(preset);
+                      onSelectPreset?.(preset);
+                    }}
+                    className={`flex-1 py-2 rounded-lg font-medium transition-colors ${
+                      (currentPresetId || currentPreset?.id) === preset.id
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {(currentPresetId || currentPreset?.id) === preset.id ? 'Active' : 'Use This'}
+                  </button>
+                  
+                  {!preset.isDefault && (
+                    <>
+                      <button
+                        onClick={() => setEditingPreset(preset)}
+                        className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => deletePreset(preset.id)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          ))}
         </div>
 
-        {/* Edit Dialog */}
-        <Dialog open={!!editingPreset} onOpenChange={() => setEditingPreset(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Edit Preset</DialogTitle>
-              <DialogDescription>
-                Modify the settings for this custom preset.
-              </DialogDescription>
-            </DialogHeader>
-            <PresetForm />
-          </DialogContent>
-        </Dialog>
-      </CardContent>
-    </Card>
+        {/* Create/Edit Modal */}
+        {(isCreating || editingPreset) && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl"
+            >
+              <h2 className="text-2xl font-bold mb-6 text-gray-900">
+                {editingPreset ? 'Edit Preset' : 'Create New Preset'}
+              </h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Preset Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={editingPreset?.name || newPreset.name}
+                    onChange={(e) => editingPreset
+                      ? setEditingPreset({ ...editingPreset, name: e.target.value })
+                      : setNewPreset({ ...newPreset, name: e.target.value })
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    placeholder="My Custom Preset"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Work Duration (min)
+                    </label>
+                    <input
+                      type="number"
+                      value={editingPreset?.workDuration || newPreset.workDuration}
+                      onChange={(e) => editingPreset
+                        ? setEditingPreset({ ...editingPreset, workDuration: parseInt(e.target.value) })
+                        : setNewPreset({ ...newPreset, workDuration: parseInt(e.target.value) })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      min="1"
+                      max="120"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Short Break (min)
+                    </label>
+                    <input
+                      type="number"
+                      value={editingPreset?.shortBreakDuration || newPreset.shortBreakDuration}
+                      onChange={(e) => editingPreset
+                        ? setEditingPreset({ ...editingPreset, shortBreakDuration: parseInt(e.target.value) })
+                        : setNewPreset({ ...newPreset, shortBreakDuration: parseInt(e.target.value) })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      min="1"
+                      max="30"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Long Break (min)
+                    </label>
+                    <input
+                      type="number"
+                      value={editingPreset?.longBreakDuration || newPreset.longBreakDuration}
+                      onChange={(e) => editingPreset
+                        ? setEditingPreset({ ...editingPreset, longBreakDuration: parseInt(e.target.value) })
+                        : setNewPreset({ ...newPreset, longBreakDuration: parseInt(e.target.value) })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      min="1"
+                      max="60"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Sessions Before Long Break
+                    </label>
+                    <input
+                      type="number"
+                      value={editingPreset?.sessionsBeforeLongBreak || newPreset.sessionsBeforeLongBreak}
+                      onChange={(e) => editingPreset
+                        ? setEditingPreset({ ...editingPreset, sessionsBeforeLongBreak: parseInt(e.target.value) })
+                        : setNewPreset({ ...newPreset, sessionsBeforeLongBreak: parseInt(e.target.value) })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      min="1"
+                      max="10"
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Color Theme
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {colorOptions.map((color) => (
+                      <button
+                        key={color}
+                        onClick={() => editingPreset
+                          ? setEditingPreset({ ...editingPreset, color })
+                          : setNewPreset({ ...newPreset, color })
+                        }
+                        className={`h-12 rounded-lg bg-gradient-to-r ${color} ${
+                          (editingPreset?.color || newPreset.color) === color
+                            ? 'ring-4 ring-blue-500'
+                            : 'hover:scale-105'
+                        } transition-transform`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-8 flex gap-3">
+                <button
+                  onClick={editingPreset ? updatePreset : createPreset}
+                  className="flex-1 py-3 bg-gradient-to-r from-orange-600 to-pink-600 text-white rounded-xl font-semibold hover:shadow-lg transition-shadow"
+                >
+                  {editingPreset ? 'Update Preset' : 'Create Preset'}
+                </button>
+                <button
+                  onClick={() => {
+                    setIsCreating(false);
+                    setEditingPreset(null);
+                    resetForm();
+                  }}
+                  className="px-6 py-3 bg-gray-200 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

@@ -1,26 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Progress } from "./ui/progress";
 import { Badge } from "./ui/badge";
-import { Switch } from "./ui/switch";
-import { Label } from "./ui/label";
-import { Play, Pause, RotateCcw, Coffee, BookOpen, FastForward, Zap, Eye, Bell, Shield, AlertTriangle } from "lucide-react";
-import { motion } from "motion/react";
-import { FocusTracker } from '../lib/focusTracker';
-import { NotificationManager } from '../lib/notifications';
-import { toast } from 'sonner@2.0.3';
-
-interface SessionPreset {
-  id: string;
-  name: string;
-  workDuration: number;
-  breakDuration: number;
-  longBreakDuration?: number;
-  sessionsBeforeLongBreak?: number;
-  color: string;
-  isDefault?: boolean;
-}
+import { Play, Pause, RotateCcw, Coffee, BookOpen, FastForward, Zap, AlertTriangle } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { toast } from '../lib/notifications';
+import { PomodoroPreset } from './SessionPresets';
 
 interface TimerComponentProps {
   onSessionComplete: (focusLevel: number) => void;
@@ -28,14 +14,7 @@ interface TimerComponentProps {
   onFocusChange: (level: number) => void;
   isActive: boolean;
   onActiveChange: (active: boolean) => void;
-  preset: SessionPreset;
-  sessionCount: number;
-}
-
-interface DistractionSite {
-  url: string;
-  name: string;
-  blocked: boolean;
+  preset?: PomodoroPreset | null;
 }
 
 export function TimerComponent({ 
@@ -44,83 +23,103 @@ export function TimerComponent({
   onFocusChange, 
   isActive, 
   onActiveChange,
-  preset,
-  sessionCount: parentSessionCount
+  preset
 }: TimerComponentProps) {
+  const [timeLeft, setTimeLeft] = useState(25 * 60); // 25 minutes in seconds
   const [isBreak, setIsBreak] = useState(false);
   const [focusLevel, setFocusLevel] = useState(5);
+  const [sessionCount, setSessionCount] = useState(0);
   const [isDemoMode, setIsDemoMode] = useState(false);
   
   // Focus blocking features
-  const [focusBlockingEnabled, setFocusBlockingEnabled] = useState(false);
-  const [tabSwitchCount, setTabSwitchCount] = useState(0);
-  const [distractionDetected, setDistractionDetected] = useState(false);
-  const [lastVisibilityChange, setLastVisibilityChange] = useState<Date>(new Date());
-
-  // Calculate session and break durations based on preset and session count
-  const sessionDuration = preset.workDuration * 60;
-  const isLongBreak = preset.longBreakDuration && preset.sessionsBeforeLongBreak && 
-    (parentSessionCount + 1) % preset.sessionsBeforeLongBreak === 0;
-  const breakDuration = isLongBreak ? (preset.longBreakDuration! * 60) : (preset.breakDuration * 60);
+  const [focusBlockingEnabled, setFocusBlockingEnabled] = useState(true);
+  const [distractionCount, setDistractionCount] = useState(0);
+  const [showDistractionWarning, setShowDistractionWarning] = useState(false);
+  const [lastTabSwitchTime, setLastTabSwitchTime] = useState<number | null>(null);
   
-  const [timeLeft, setTimeLeft] = useState(sessionDuration);
+  // Use ref to avoid calling parent setState during render
+  const prevFocusLevelRef = useRef(focusLevel);
 
-  // Page Visibility API for focus blocking
+  // Get durations from preset or use defaults
+  const sessionDuration = preset?.workDuration ? preset.workDuration * 60 : 25 * 60;
+  const shortBreakDuration = preset?.shortBreakDuration ? preset.shortBreakDuration * 60 : 5 * 60;
+  const longBreakDuration = preset?.longBreakDuration ? preset.longBreakDuration * 60 : 15 * 60;
+  const sessionsBeforeLongBreak = preset?.sessionsBeforeLongBreak || 4;
+  
+  // Determine if this should be a long break
+  const shouldBeLongBreak = sessionCount > 0 && sessionCount % sessionsBeforeLongBreak === 0;
+  const breakDuration = shouldBeLongBreak ? longBreakDuration : shortBreakDuration;
+
+  // Update timer when preset changes
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden && focusBlockingEnabled && isActive && !isBreak) {
-        const now = new Date();
-        const timeSinceLastChange = now.getTime() - lastVisibilityChange.getTime();
-        
-        // Only count as distraction if away for at least 3 seconds
-        if (timeSinceLastChange > 3000) {
-          setTabSwitchCount(prev => prev + 1);
-          setDistractionDetected(true);
-          
-          // Reduce focus level for excessive tab switching
-          if (tabSwitchCount >= 3) {
-            const newLevel = Math.max(1, focusLevel - 1);
-            setFocusLevel(newLevel);
-            onFocusChange(newLevel);
-            toast.warning(`Focus decreased due to distractions (${tabSwitchCount + 1} tab switches)`);
-          } else {
-            toast.warning(`Distraction detected! Stay focused (${tabSwitchCount + 1}/5)`);
-          }
-        }
-        setLastVisibilityChange(now);
-      } else if (!document.hidden && distractionDetected) {
-        // User returned to the tab
-        setTimeout(() => setDistractionDetected(false), 2000);
-      }
-    };
-
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (focusBlockingEnabled && isActive && !isBreak) {
-        e.preventDefault();
-        e.returnValue = 'You have an active study session. Are you sure you want to leave?';
-        return e.returnValue;
-      }
-    };
-
-    if (focusBlockingEnabled) {
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      window.addEventListener('beforeunload', handleBeforeUnload);
+    if (!isActive) {
+      setTimeLeft(isBreak ? breakDuration : sessionDuration);
     }
+  }, [preset, isBreak, breakDuration, sessionDuration, isActive]);
+
+  // Notify parent of focus changes (separate effect)
+  useEffect(() => {
+    if (prevFocusLevelRef.current !== focusLevel) {
+      prevFocusLevelRef.current = focusLevel;
+      onFocusChange(focusLevel);
+    }
+  }, [focusLevel, onFocusChange]);
+
+  // Page Visibility API for focus tracking
+  useEffect(() => {
+    if (!focusBlockingEnabled || isBreak || !isActive) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // User switched away from tab
+        setLastTabSwitchTime(Date.now());
+      } else {
+        // User returned to tab
+        if (lastTabSwitchTime) {
+          const newDistractionCount = distractionCount + 1;
+          setDistractionCount(newDistractionCount);
+          
+          // Show warning
+          setShowDistractionWarning(true);
+          setTimeout(() => setShowDistractionWarning(false), 3000);
+          
+          // Auto-reduce focus level if too many distractions
+          if (newDistractionCount >= 5 && focusLevel > 1) {
+            const newFocus = Math.max(1, focusLevel - 1);
+            setFocusLevel(newFocus);
+            toast.warning(`Focus level reduced to ${newFocus}/5 due to distractions`);
+          } else if (newDistractionCount >= 3) {
+            toast.warning(`${newDistractionCount} distractions detected. Stay focused!`);
+          }
+          
+          setLastTabSwitchTime(null);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [focusBlockingEnabled, isBreak, isActive, distractionCount, focusLevel, lastTabSwitchTime]);
+
+  // Warn before leaving during active session
+  useEffect(() => {
+    if (!focusBlockingEnabled || !isActive || isBreak) return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'You have an active study session. Are you sure you want to leave?';
+      return e.returnValue;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [focusBlockingEnabled, isActive, isBreak, tabSwitchCount, focusLevel, lastVisibilityChange, distractionDetected, onFocusChange]);
-
-  // Reset distraction tracking when starting new session
-  useEffect(() => {
-    if (isActive && !isBreak) {
-      setTabSwitchCount(0);
-      setDistractionDetected(false);
-      setLastVisibilityChange(new Date());
-    }
-  }, [isActive, isBreak]);
+  }, [focusBlockingEnabled, isActive, isBreak]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -138,8 +137,8 @@ export function TimerComponent({
             } else {
               // Work session completed
               setIsBreak(true);
-              const newBreakDuration = isLongBreak ? (preset.longBreakDuration! * 60) : (preset.breakDuration * 60);
-              setTimeLeft(newBreakDuration);
+              setTimeLeft(breakDuration);
+              setSessionCount(prev => prev + 1);
               onSessionComplete(focusLevel);
             }
             return time - 1;
@@ -150,7 +149,7 @@ export function TimerComponent({
     }
 
     return () => clearInterval(interval);
-  }, [isActive, timeLeft, isBreak, focusLevel, onSessionComplete, onBreakComplete, onActiveChange, sessionDuration, breakDuration, preset, isLongBreak]);
+  }, [isActive, timeLeft, isBreak, focusLevel, onSessionComplete, onBreakComplete, onActiveChange]);
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -171,7 +170,6 @@ export function TimerComponent({
   const adjustFocus = (change: number) => {
     const newLevel = Math.max(1, Math.min(5, focusLevel + change));
     setFocusLevel(newLevel);
-    onFocusChange(newLevel);
   };
 
   const handleDemoSkip = () => {
@@ -184,8 +182,8 @@ export function TimerComponent({
     } else {
       // Skip work session - go to break
       setIsBreak(true);
-      const newBreakDuration = isLongBreak ? (preset.longBreakDuration! * 60) : (preset.breakDuration * 60);
-      setTimeLeft(newBreakDuration);
+      setTimeLeft(breakDuration);
+      setSessionCount(prev => prev + 1);
       onSessionComplete(focusLevel);
     }
   };
@@ -193,24 +191,6 @@ export function TimerComponent({
   const toggleDemoMode = () => {
     setIsDemoMode(!isDemoMode);
   };
-
-  const toggleFocusBlocking = () => {
-    setFocusBlockingEnabled(!focusBlockingEnabled);
-    if (!focusBlockingEnabled) {
-      toast.success('Focus blocking enabled! Tab switching will be tracked.');
-    } else {
-      toast.info('Focus blocking disabled.');
-    }
-  };
-
-  const getDistractionLevel = () => {
-    if (tabSwitchCount === 0) return { level: 'excellent', color: 'text-green-600', emoji: '🎯' };
-    if (tabSwitchCount <= 2) return { level: 'good', color: 'text-blue-600', emoji: '👍' };
-    if (tabSwitchCount <= 4) return { level: 'fair', color: 'text-yellow-600', emoji: '⚠️' };
-    return { level: 'poor', color: 'text-red-600', emoji: '😰' };
-  };
-
-  const distractionLevel = getDistractionLevel();
 
   return (
     <motion.div
@@ -255,14 +235,8 @@ export function TimerComponent({
                 <BookOpen className="w-5 h-5 text-blue-500" />
               )}
             </motion.div>
-            {isBreak ? (isLongBreak ? 'Long Break' : 'Break Time') : `Study Session ${parentSessionCount + 1}`}
+            {isBreak ? 'Break Time' : `Study Session ${sessionCount + 1}`}
           </CardTitle>
-          
-          {/* Preset indicator */}
-          <div className="flex items-center justify-center gap-2 mt-2">
-            <div className={`w-3 h-3 rounded-full ${preset.color}`} />
-            <span className="text-sm text-muted-foreground">{preset.name}</span>
-          </div>
         </CardHeader>
       <CardContent className="space-y-6">
         {/* Timer Display */}
@@ -339,54 +313,26 @@ export function TimerComponent({
           )}
         </div>
 
-        {/* Focus Blocking Controls */}
-        <div className="space-y-3 border-t pt-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-blue-500" />
-              <Label htmlFor="focus-blocking">Focus Blocking</Label>
-            </div>
-            <Switch
-              id="focus-blocking"
-              checked={focusBlockingEnabled}
-              onCheckedChange={toggleFocusBlocking}
-            />
-          </div>
-          
-          {focusBlockingEnabled && (
-            <motion.div 
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              className="space-y-2"
-            >
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Tab switches:</span>
-                <span className={`font-medium ${distractionLevel.color}`}>
-                  {tabSwitchCount} {distractionLevel.emoji}
-                </span>
-              </div>
-              
-              {distractionDetected && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex items-center gap-2 p-2 bg-yellow-50 text-yellow-800 rounded-lg text-sm"
-                >
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>Welcome back! Stay focused on your studies.</span>
-                </motion.div>
-              )}
-              
-              <div className="text-xs text-muted-foreground">
-                Focus blocking tracks tab switches to help maintain concentration.
-              </div>
-            </motion.div>
-          )}
-        </div>
-
         {/* Focus Level Tracker (only during work sessions) */}
         {!isBreak && (
           <div className="space-y-3">
+            {/* Distraction Warning */}
+            <AnimatePresence>
+              {showDistractionWarning && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center gap-2"
+                >
+                  <AlertTriangle className="w-4 h-4 text-yellow-600" />
+                  <span className="text-sm text-yellow-800 font-medium">
+                    Tab switch detected! Stay focused on your study session.
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <div className="text-center">
               <p className="text-sm text-muted-foreground mb-2">How focused are you?</p>
               <div className="flex items-center justify-center gap-2">
@@ -426,22 +372,45 @@ export function TimerComponent({
                 {focusLevel === 5 && '🌟 Excellent focus'}
               </p>
             </div>
+
+            {/* Focus Blocking Toggle */}
+            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center gap-2 text-sm">
+                <AlertTriangle className="w-4 h-4 text-gray-600" />
+                <span className="text-gray-700 font-medium">Focus Blocking</span>
+              </div>
+              <button
+                onClick={() => setFocusBlockingEnabled(!focusBlockingEnabled)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${
+                  focusBlockingEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                }`}
+              >
+                <motion.div
+                  className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full"
+                  animate={{ x: focusBlockingEnabled ? 20 : 0 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                />
+              </button>
+            </div>
+
+            {/* Distraction Counter */}
+            {distractionCount > 0 && (
+              <div className="text-center text-xs text-gray-600">
+                {distractionCount} distraction{distractionCount !== 1 ? 's' : ''} detected this session
+              </div>
+            )}
           </div>
         )}
 
         {/* Session Stats */}
-        <div className="grid grid-cols-3 gap-4 text-center text-sm">
+        <div className="grid grid-cols-2 gap-4 text-center text-sm">
           <div>
-            <p className="text-muted-foreground">Sessions</p>
-            <p className="font-medium">{parentSessionCount}</p>
+            <p className="text-muted-foreground">Sessions Today</p>
+            <p className="font-medium">{sessionCount}</p>
           </div>
           <div>
-            <p className="text-muted-foreground">Focus Level</p>
+            <p className="text-muted-foreground">Current Focus</p>
             <p className="font-medium">{focusLevel}/5</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Distractions</p>
-            <p className={`font-medium ${distractionLevel.color}`}>{tabSwitchCount}</p>
           </div>
         </div>
       </CardContent>

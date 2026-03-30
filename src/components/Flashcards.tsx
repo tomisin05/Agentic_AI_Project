@@ -1,478 +1,447 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Textarea } from './ui/textarea';
-import { Badge } from './ui/badge';
-import { Progress } from './ui/progress';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Label } from './ui/label';
-import { toast } from 'sonner@2.0.3';
-import { 
-  Brain, 
-  Plus, 
-  BookOpen, 
-  Clock, 
-  TrendingUp, 
-  RotateCcw,
-  Eye,
-  EyeOff,
-  Shuffle,
-  Download,
-  Upload,
-  Star
-} from 'lucide-react';
-import { 
-  FlashcardData, 
-  SpacedRepetitionScheduler, 
-  FlashcardStorage, 
-  ReviewResult 
-} from '../lib/spacedRepetition';
+import { BookOpen, Plus, Trash2, Edit2, Download, Upload, Play, ArrowLeft } from 'lucide-react';
+import { SpacedRepetitionSystem, Flashcard, ReviewDifficulty } from '../lib/spacedRepetition';
+import { motion, AnimatePresence } from 'motion/react';
 
-interface FlashcardsProps {
-  onClose?: () => void;
-}
-
-export function Flashcards({ onClose }: FlashcardsProps) {
-  const [cards, setCards] = useState<FlashcardData[]>([]);
+export function Flashcards({ onBack }: { onBack?: () => void }) {
+  const [cards, setCards] = useState<Flashcard[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isStudying, setIsStudying] = useState(false);
+  const [studyMode, setStudyMode] = useState<'due' | 'new' | 'all'>('due');
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
-  const [reviewMode, setReviewMode] = useState<'due' | 'new' | 'all'>('due');
-  const [studyCards, setStudyCards] = useState<FlashcardData[]>([]);
-  const [isCreating, setIsCreating] = useState(false);
   const [newCard, setNewCard] = useState({ front: '', back: '', tags: '' });
 
+  // Load cards from localStorage
   useEffect(() => {
-    loadFlashcards();
+    const stored = localStorage.getItem('flashcards');
+    if (stored) {
+      try {
+        setCards(JSON.parse(stored));
+      } catch (error) {
+        console.error('Failed to load flashcards:', error);
+      }
+    }
   }, []);
 
+  // Save cards to localStorage
   useEffect(() => {
-    updateStudyCards();
-  }, [cards, reviewMode]);
-
-  const loadFlashcards = () => {
-    const loadedCards = FlashcardStorage.loadCards();
-    setCards(loadedCards);
-  };
-
-  const saveFlashcards = (updatedCards: FlashcardData[]) => {
-    setCards(updatedCards);
-    FlashcardStorage.saveCards(updatedCards);
-  };
-
-  const updateStudyCards = () => {
-    let filteredCards: FlashcardData[] = [];
-    
-    switch (reviewMode) {
-      case 'due':
-        filteredCards = SpacedRepetitionScheduler.getDueCards(cards);
-        break;
-      case 'new':
-        filteredCards = SpacedRepetitionScheduler.getNewCards(cards);
-        break;
-      case 'all':
-        filteredCards = [...cards];
-        break;
+    if (cards.length > 0) {
+      localStorage.setItem('flashcards', JSON.stringify(cards));
     }
-    
-    setStudyCards(filteredCards);
+  }, [cards]);
+
+  const createCard = () => {
+    if (!newCard.front.trim() || !newCard.back.trim()) return;
+
+    const card = SpacedRepetitionSystem.createCard(
+      newCard.front,
+      newCard.back,
+      newCard.tags.split(',').map(t => t.trim()).filter(Boolean)
+    );
+
+    setCards([...cards, card]);
+    setNewCard({ front: '', back: '', tags: '' });
+    setIsCreating(false);
+  };
+
+  const deleteCard = (id: string) => {
+    setCards(cards.filter(c => c.id !== id));
+  };
+
+  const startStudySession = (mode: 'due' | 'new' | 'all') => {
+    setStudyMode(mode);
     setCurrentCardIndex(0);
     setShowAnswer(false);
+    setIsStudying(true);
   };
 
-  const handleReview = (quality: number) => {
-    if (studyCards.length === 0) return;
+  const reviewCard = (difficulty: ReviewDifficulty) => {
+    const studyCards = getStudyCards();
+    if (currentCardIndex >= studyCards.length) return;
 
     const currentCard = studyCards[currentCardIndex];
-    const reviewResult: ReviewResult = { quality };
-    const updatedCard = SpacedRepetitionScheduler.reviewCard(currentCard, reviewResult);
+    const updatedCard = SpacedRepetitionSystem.reviewCard(currentCard, difficulty);
     
-    const updatedCards = cards.map(card => 
-      card.id === currentCard.id ? updatedCard : card
-    );
+    setCards(cards.map(c => c.id === updatedCard.id ? updatedCard : c));
     
-    saveFlashcards(updatedCards);
-
-    // Move to next card or finish session
     if (currentCardIndex < studyCards.length - 1) {
       setCurrentCardIndex(currentCardIndex + 1);
       setShowAnswer(false);
     } else {
-      toast.success('Review session completed! 🎉');
-      updateStudyCards(); // Refresh the deck
+      setIsStudying(false);
+      setCurrentCardIndex(0);
     }
   };
 
-  const createFlashcard = () => {
-    if (!newCard.front.trim() || !newCard.back.trim()) {
-      toast.error('Please fill in both front and back of the card');
-      return;
+  const getStudyCards = (): Flashcard[] => {
+    switch (studyMode) {
+      case 'due':
+        return SpacedRepetitionSystem.getDueCards(cards);
+      case 'new':
+        return SpacedRepetitionSystem.getNewCards(cards);
+      case 'all':
+        return cards;
+      default:
+        return [];
     }
-
-    const tags = newCard.tags.split(',').map(tag => tag.trim()).filter(Boolean);
-    const flashcard = SpacedRepetitionScheduler.createFlashcard(
-      newCard.front.trim(),
-      newCard.back.trim(),
-      tags
-    );
-
-    const updatedCards = [...cards, flashcard];
-    saveFlashcards(updatedCards);
-    
-    setNewCard({ front: '', back: '', tags: '' });
-    setIsCreating(false);
-    toast.success('Flashcard created!');
   };
 
-  const deleteCard = (cardId: string) => {
-    const updatedCards = cards.filter(card => card.id !== cardId);
-    saveFlashcards(updatedCards);
-    toast.success('Flashcard deleted');
-  };
-
-  const exportCards = () => {
-    const dataStr = FlashcardStorage.exportCards(cards);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `flashcards-${new Date().toISOString().split('T')[0]}.json`;
-    link.click();
+  const exportDeck = () => {
+    const json = SpacedRepetitionSystem.exportDeck(cards);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `flashcards-${Date.now()}.json`;
+    a.click();
     URL.revokeObjectURL(url);
-    toast.success('Flashcards exported!');
   };
 
-  const importCards = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const importDeck = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (event) => {
       try {
-        const importedCards = FlashcardStorage.importCards(e.target?.result as string);
-        const updatedCards = [...cards, ...importedCards];
-        saveFlashcards(updatedCards);
-        toast.success(`Imported ${importedCards.length} flashcards!`);
+        const json = event.target?.result as string;
+        const importedCards = SpacedRepetitionSystem.importDeck(json);
+        setCards([...cards, ...importedCards]);
       } catch (error) {
-        toast.error('Failed to import flashcards. Please check the file format.');
+        console.error('Failed to import deck:', error);
       }
     };
     reader.readAsText(file);
   };
 
-  const stats = SpacedRepetitionScheduler.getCardStats(cards);
+  const stats = SpacedRepetitionSystem.getDeckStatistics(cards);
+  const studyCards = getStudyCards();
   const currentCard = studyCards[currentCardIndex];
 
-  const difficultyButtons = [
-    { quality: 0, label: 'Again', color: 'bg-red-500 hover:bg-red-600', description: 'Complete blackout' },
-    { quality: 1, label: 'Hard', color: 'bg-orange-500 hover:bg-orange-600', description: 'Incorrect but familiar' },
-    { quality: 2, label: 'Good', color: 'bg-yellow-500 hover:bg-yellow-600', description: 'Incorrect, easy to recall' },
-    { quality: 3, label: 'Easy', color: 'bg-green-500 hover:bg-green-600', description: 'Correct but difficult' },
-    { quality: 4, label: 'Perfect', color: 'bg-blue-500 hover:bg-blue-600', description: 'Correct after hesitation' },
-    { quality: 5, label: 'Trivial', color: 'bg-purple-500 hover:bg-purple-600', description: 'Perfect recall' },
-  ];
-
-  return (
-    <div className="max-w-4xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Brain className="w-8 h-8 text-purple-600" />
-          <div>
-            <h1 className="text-2xl font-bold">Flashcards</h1>
-            <p className="text-muted-foreground">Spaced repetition learning system</p>
-          </div>
-        </div>
-        {onClose && (
-          <Button variant="outline" onClick={onClose}>
-            Close
-          </Button>
-        )}
-      </div>
-
-      {/* Stats Overview */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card>
-          <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold">{stats.total}</div>
-            <div className="text-sm text-muted-foreground">Total Cards</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-red-600">{stats.due}</div>
-            <div className="text-sm text-muted-foreground">Due Now</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-blue-600">{stats.new}</div>
-            <div className="text-sm text-muted-foreground">New</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-yellow-600">{stats.learning}</div>
-            <div className="text-sm text-muted-foreground">Learning</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-green-600">{stats.mature}</div>
-            <div className="text-sm text-muted-foreground">Mature</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs defaultValue="study" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="study">Study</TabsTrigger>
-          <TabsTrigger value="browse">Browse Cards</TabsTrigger>
-          <TabsTrigger value="create">Create</TabsTrigger>
-        </TabsList>
-
-        {/* Study Tab */}
-        <TabsContent value="study" className="space-y-4">
-          <div className="flex gap-4 items-center">
-            <Select value={reviewMode} onValueChange={(value: any) => setReviewMode(value)}>
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="due">Due Cards ({stats.due})</SelectItem>
-                <SelectItem value="new">New Cards ({stats.new})</SelectItem>
-                <SelectItem value="all">All Cards ({stats.total})</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button variant="outline" onClick={updateStudyCards}>
-              <RotateCcw className="w-4 h-4 mr-2" />
-              Refresh
-            </Button>
+  if (isStudying && currentCard) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-6">
+        <div className="max-w-2xl mx-auto">
+          <div className="mb-6 flex items-center justify-between">
+            <button
+              onClick={() => setIsStudying(false)}
+              className="px-4 py-2 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
+            >
+              ← Back to Deck
+            </button>
+            <div className="text-lg font-medium text-gray-700">
+              Card {currentCardIndex + 1} of {studyCards.length}
+            </div>
           </div>
 
-          {studyCards.length > 0 ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-muted-foreground">
-                  Card {currentCardIndex + 1} of {studyCards.length}
-                </div>
-                <Progress value={((currentCardIndex + 1) / studyCards.length) * 100} className="w-32" />
-              </div>
-
-              <Card className="min-h-96">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">
-                      {showAnswer ? 'Answer' : 'Question'}
-                    </CardTitle>
-                    <div className="flex gap-2">
-                      {currentCard?.tags?.map(tag => (
-                        <Badge key={tag} variant="secondary">{tag}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="text-lg leading-relaxed min-h-32 flex items-center">
-                    {showAnswer ? currentCard?.back : currentCard?.front}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentCard.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="bg-white rounded-2xl shadow-xl p-8 min-h-[400px] flex flex-col"
+            >
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-2xl font-bold mb-6 text-gray-800">
+                    {currentCard.front}
                   </div>
                   
-                  {!showAnswer ? (
-                    <Button onClick={() => setShowAnswer(true)} className="w-full">
-                      <Eye className="w-4 h-4 mr-2" />
-                      Show Answer
-                    </Button>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="text-sm text-muted-foreground text-center">
-                        How well did you remember this?
+                  {showAnswer && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="mt-8 pt-8 border-t-2 border-gray-200"
+                    >
+                      <div className="text-xl text-gray-700">
+                        {currentCard.back}
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                        {difficultyButtons.map(({ quality, label, color, description }) => (
-                          <Button
-                            key={quality}
-                            onClick={() => handleReview(quality)}
-                            className={`${color} text-white flex flex-col h-auto py-3`}
-                            title={description}
-                          >
-                            <span className="font-medium">{label}</span>
-                            <span className="text-xs opacity-90">{quality}</span>
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
+                    </motion.div>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
+
+              {!showAnswer ? (
+                <button
+                  onClick={() => setShowAnswer(true)}
+                  className="mt-6 w-full py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:shadow-lg transition-shadow"
+                >
+                  Show Answer
+                </button>
+              ) : (
+                <div className="mt-6 space-y-3">
+                  <div className="text-sm font-medium text-gray-600 mb-2">
+                    How well did you know this?
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => reviewCard(0)}
+                      className="py-3 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors font-medium"
+                    >
+                      Again
+                    </button>
+                    <button
+                      onClick={() => reviewCard(1)}
+                      className="py-3 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors font-medium"
+                    >
+                      Hard
+                    </button>
+                    <button
+                      onClick={() => reviewCard(2)}
+                      className="py-3 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors font-medium"
+                    >
+                      Good
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => reviewCard(3)}
+                      className="py-3 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors font-medium"
+                    >
+                      Easy
+                    </button>
+                    <button
+                      onClick={() => reviewCard(4)}
+                      className="py-3 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-medium"
+                    >
+                      Perfect
+                    </button>
+                    <button
+                      onClick={() => reviewCard(5)}
+                      className="py-3 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors font-medium"
+                    >
+                      Trivial
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-6">
+      <div className="max-w-6xl mx-auto">
+        <div className="mb-8">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="mb-4 px-4 py-2 bg-white rounded-lg shadow hover:shadow-md transition-shadow flex items-center gap-2 text-gray-700"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Study
+            </button>
+          )}
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-900 mb-2">
+                📚 Flashcards
+              </h1>
+              <p className="text-gray-600">
+                Spaced repetition for long-term retention
+              </p>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsCreating(true)}
+                className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:shadow-lg transition-shadow flex items-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                New Card
+              </button>
+              <button
+                onClick={exportDeck}
+                className="px-4 py-3 bg-white rounded-xl shadow hover:shadow-md transition-shadow"
+              >
+                <Download className="w-5 h-5 text-gray-700" />
+              </button>
+              <label className="px-4 py-3 bg-white rounded-xl shadow hover:shadow-md transition-shadow cursor-pointer">
+                <Upload className="w-5 h-5 text-gray-700" />
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={importDeck}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Statistics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-white rounded-xl p-6 shadow">
+            <div className="text-3xl font-bold text-purple-600">{stats.total}</div>
+            <div className="text-sm text-gray-600">Total Cards</div>
+          </div>
+          <div className="bg-white rounded-xl p-6 shadow">
+            <div className="text-3xl font-bold text-red-600">{stats.due}</div>
+            <div className="text-sm text-gray-600">Due for Review</div>
+          </div>
+          <div className="bg-white rounded-xl p-6 shadow">
+            <div className="text-3xl font-bold text-blue-600">{stats.new}</div>
+            <div className="text-sm text-gray-600">New Cards</div>
+          </div>
+          <div className="bg-white rounded-xl p-6 shadow">
+            <div className="text-3xl font-bold text-green-600">{stats.avgRetention}%</div>
+            <div className="text-sm text-gray-600">Avg Retention</div>
+          </div>
+        </div>
+
+        {/* Study Modes */}
+        <div className="grid md:grid-cols-3 gap-4 mb-8">
+          <button
+            onClick={() => startStudySession('due')}
+            className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition-shadow text-left"
+          >
+            <Play className="w-8 h-8 text-red-600 mb-3" />
+            <div className="text-xl font-bold text-gray-900">Study Due Cards</div>
+            <div className="text-gray-600">{stats.due} cards ready for review</div>
+          </button>
+          
+          <button
+            onClick={() => startStudySession('new')}
+            className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition-shadow text-left"
+          >
+            <Play className="w-8 h-8 text-blue-600 mb-3" />
+            <div className="text-xl font-bold text-gray-900">Learn New Cards</div>
+            <div className="text-gray-600">{stats.new} new cards to learn</div>
+          </button>
+          
+          <button
+            onClick={() => startStudySession('all')}
+            className="bg-white rounded-xl p-6 shadow hover:shadow-lg transition-shadow text-left"
+          >
+            <Play className="w-8 h-8 text-purple-600 mb-3" />
+            <div className="text-xl font-bold text-gray-900">Practice All</div>
+            <div className="text-gray-600">{stats.total} cards in deck</div>
+          </button>
+        </div>
+
+        {/* Card Creation Modal */}
+        {isCreating && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white rounded-2xl p-8 max-w-2xl w-full shadow-2xl"
+            >
+              <h2 className="text-2xl font-bold mb-6 text-gray-900">Create New Card</h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Front (Question)
+                  </label>
+                  <textarea
+                    value={newCard.front}
+                    onChange={(e) => setNewCard({ ...newCard, front: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                    rows={3}
+                    placeholder="What is the capital of France?"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Back (Answer)
+                  </label>
+                  <textarea
+                    value={newCard.back}
+                    onChange={(e) => setNewCard({ ...newCard, back: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                    rows={3}
+                    placeholder="Paris"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tags (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={newCard.tags}
+                    onChange={(e) => setNewCard({ ...newCard, tags: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="geography, capitals, europe"
+                  />
+                </div>
+              </div>
+              
+              <div className="mt-8 flex gap-3">
+                <button
+                  onClick={createCard}
+                  className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:shadow-lg transition-shadow"
+                >
+                  Create Card
+                </button>
+                <button
+                  onClick={() => {
+                    setIsCreating(false);
+                    setNewCard({ front: '', back: '', tags: '' });
+                  }}
+                  className="px-6 py-3 bg-gray-200 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Card List */}
+        <div className="bg-white rounded-2xl shadow-lg p-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">All Cards</h2>
+          {cards.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <BookOpen className="w-16 h-16 mx-auto mb-4 opacity-50" />
+              <p>No flashcards yet. Create your first card to get started!</p>
             </div>
           ) : (
-            <Card>
-              <CardContent className="p-8 text-center">
-                <BookOpen className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-medium mb-2">No cards to review</h3>
-                <p className="text-muted-foreground mb-4">
-                  {reviewMode === 'due' 
-                    ? "Great job! No cards are due for review right now."
-                    : reviewMode === 'new'
-                    ? "No new cards available. Create some cards to start learning!"
-                    : "No flashcards found. Create your first card to get started."
-                  }
-                </p>
-                <Button onClick={() => setReviewMode('all')}>Browse All Cards</Button>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        {/* Browse Cards Tab */}
-        <TabsContent value="browse" className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-medium">All Flashcards</h3>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={exportCards}>
-                <Download className="w-4 h-4 mr-2" />
-                Export
-              </Button>
-              <Label htmlFor="import-cards" className="cursor-pointer">
-                <Button variant="outline" asChild>
-                  <span>
-                    <Upload className="w-4 h-4 mr-2" />
-                    Import
-                  </span>
-                </Button>
-                <input 
-                  id="import-cards"
-                  type="file" 
-                  accept=".json" 
-                  onChange={importCards}
-                  className="hidden" 
-                />
-              </Label>
-            </div>
-          </div>
-
-          <div className="grid gap-4">
-            {cards.map((card) => (
-              <Card key={card.id}>
-                <CardContent className="p-4">
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex gap-2">
-                      {card.tags?.map(tag => (
-                        <Badge key={tag} variant="outline">{tag}</Badge>
-                      ))}
-                      {card.source && (
-                        <Badge variant="secondary">{card.source}</Badge>
-                      )}
-                    </div>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => deleteCard(card.id)}
-                      className="text-red-500 hover:text-red-700"
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                  <div className="space-y-2">
-                    <div>
-                      <div className="text-sm font-medium text-muted-foreground">Front:</div>
-                      <div>{card.front}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-muted-foreground">Back:</div>
-                      <div>{card.back}</div>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center mt-3 text-sm text-muted-foreground">
-                    <div>
-                      Next review: {card.nextReview.toLocaleDateString()}
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <span>Interval: {card.interval}d</span>
-                      <span>Reps: {card.repetitions}</span>
-                      <div className="flex items-center gap-1">
-                        <Star className="w-3 h-3" />
-                        {card.easeFactor.toFixed(1)}
+            <div className="space-y-3">
+              {cards.map((card) => (
+                <div
+                  key={card.id}
+                  className="p-4 border border-gray-200 rounded-xl hover:border-purple-300 transition-colors"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900 mb-1">{card.front}</div>
+                      <div className="text-sm text-gray-600">{card.back}</div>
+                      <div className="mt-2 flex items-center gap-2">
+                        {card.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                        <span className="text-xs text-gray-500">
+                          {card.state} • {card.totalReviews} reviews • {SpacedRepetitionSystem.getRetentionRate(card).toFixed(0)}% retention
+                        </span>
                       </div>
                     </div>
+                    <button
+                      onClick={() => deleteCard(card.id)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {cards.length === 0 && (
-            <Card>
-              <CardContent className="p-8 text-center">
-                <Brain className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-medium mb-2">No flashcards yet</h3>
-                <p className="text-muted-foreground">Create your first flashcard to start learning!</p>
-              </CardContent>
-            </Card>
+                </div>
+              ))}
+            </div>
           )}
-        </TabsContent>
-
-        {/* Create Tab */}
-        <TabsContent value="create" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Create New Flashcard</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="front">Front (Question)</Label>
-                <Textarea
-                  id="front"
-                  placeholder="Enter the question or prompt..."
-                  value={newCard.front}
-                  onChange={(e) => setNewCard({ ...newCard, front: e.target.value })}
-                  className="min-h-24"
-                />
-              </div>
-              <div>
-                <Label htmlFor="back">Back (Answer)</Label>
-                <Textarea
-                  id="back"
-                  placeholder="Enter the answer or explanation..."
-                  value={newCard.back}
-                  onChange={(e) => setNewCard({ ...newCard, back: e.target.value })}
-                  className="min-h-24"
-                />
-              </div>
-              <div>
-                <Label htmlFor="tags">Tags (comma-separated)</Label>
-                <Input
-                  id="tags"
-                  placeholder="e.g., math, algebra, equations"
-                  value={newCard.tags}
-                  onChange={(e) => setNewCard({ ...newCard, tags: e.target.value })}
-                />
-              </div>
-              <Button onClick={createFlashcard} className="w-full">
-                <Plus className="w-4 h-4 mr-2" />
-                Create Flashcard
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Tips for Creating Effective Flashcards</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-2 text-sm">
-                <li>• Keep questions and answers concise and focused</li>
-                <li>• Use your own words to ensure understanding</li>
-                <li>• Add context when needed to avoid ambiguity</li>
-                <li>• Use tags to organize cards by topic or difficulty</li>
-                <li>• Include examples or mnemonics for better recall</li>
-                <li>• Break complex concepts into multiple simple cards</li>
-              </ul>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
     </div>
   );
 }

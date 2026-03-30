@@ -1,314 +1,380 @@
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { Alert, AlertDescription } from "./ui/alert";
-import { Download, Upload, FileText, Database, CheckCircle, AlertCircle } from 'lucide-react';
-import { motion } from "motion/react";
+import React, { useState } from 'react';
+import { Download, Upload, FileJson, Database, AlertCircle, CheckCircle } from 'lucide-react';
+import { motion } from 'motion/react';
 
-interface JournalEntry {
-  id: string;
-  date: string;
-  sessionNumber: number;
-  focusRating: number;
-  mood: string;
-  reflection: string;
-  storyOutcome: string;
-  storyChapter: string;
-}
-
-interface DataExportImportProps {
-  entries: JournalEntry[];
-  onImport: (entries: JournalEntry[]) => void;
-}
-
-export function DataExportImport({ entries, onImport }: DataExportImportProps) {
+export function DataExportImport() {
+  const [exportStatus, setExportStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [importStatus, setImportStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [importMessage, setImportMessage] = useState('');
+  const [message, setMessage] = useState('');
 
-  const exportToJSON = () => {
-    const data = {
-      exportDate: new Date().toISOString(),
-      version: '1.0',
-      entries: entries
-    };
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `storystudy-data-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  const exportData = (dataType: 'journal' | 'flashcards' | 'settings' | 'all') => {
+    try {
+      let data: any = {};
+      const timestamp = new Date().toISOString().split('T')[0];
+
+      switch (dataType) {
+        case 'journal':
+          data = {
+            type: 'journal',
+            version: '1.0',
+            exportDate: new Date().toISOString(),
+            data: JSON.parse(localStorage.getItem('journal-entries') || '[]')
+          };
+          break;
+
+        case 'flashcards':
+          data = {
+            type: 'flashcards',
+            version: '1.0',
+            exportDate: new Date().toISOString(),
+            data: JSON.parse(localStorage.getItem('flashcards') || '[]')
+          };
+          break;
+
+        case 'settings':
+          data = {
+            type: 'settings',
+            version: '1.0',
+            exportDate: new Date().toISOString(),
+            data: {
+              pomodoroPresets: JSON.parse(localStorage.getItem('pomodoro-presets') || '[]'),
+              accessibilitySettings: JSON.parse(localStorage.getItem('accessibility-settings') || '{}'),
+              language: localStorage.getItem('language') || 'en',
+              notificationsEnabled: localStorage.getItem('notifications-enabled') || 'true'
+            }
+          };
+          break;
+
+        case 'all':
+          data = {
+            type: 'complete-backup',
+            version: '1.0',
+            exportDate: new Date().toISOString(),
+            data: {
+              journal: JSON.parse(localStorage.getItem('journal-entries') || '[]'),
+              flashcards: JSON.parse(localStorage.getItem('flashcards') || '[]'),
+              scheduledSessions: JSON.parse(localStorage.getItem('scheduled-sessions') || '[]'),
+              goals: JSON.parse(localStorage.getItem('goals') || '[]'),
+              pomodoroPresets: JSON.parse(localStorage.getItem('pomodoro-presets') || '[]'),
+              accessibilitySettings: JSON.parse(localStorage.getItem('accessibility-settings') || '{}'),
+              language: localStorage.getItem('language') || 'en',
+              notificationsEnabled: localStorage.getItem('notifications-enabled') || 'true',
+              stats: {
+                totalSessions: localStorage.getItem('total-sessions') || '0',
+                totalStudyTime: localStorage.getItem('total-study-time') || '0',
+                currentStreak: localStorage.getItem('current-streak') || '0'
+              }
+            }
+          };
+          break;
+      }
+
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `storystudy-${dataType}-${timestamp}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setExportStatus('success');
+      setMessage(`${dataType} data exported successfully!`);
+      setTimeout(() => {
+        setExportStatus('idle');
+        setMessage('');
+      }, 3000);
+    } catch (error) {
+      console.error('Export failed:', error);
+      setExportStatus('error');
+      setMessage('Export failed. Please try again.');
+      setTimeout(() => {
+        setExportStatus('idle');
+        setMessage('');
+      }, 3000);
+    }
   };
 
-  const exportToCSV = () => {
-    const headers = ['Date', 'Session Number', 'Focus Rating', 'Mood', 'Reflection', 'Story Chapter'];
-    const csvContent = [
-      headers.join(','),
-      ...entries.map(entry => [
-        new Date(entry.date).toLocaleDateString(),
-        entry.sessionNumber,
-        entry.focusRating,
-        `"${entry.mood.replace(/"/g, '""')}"`,
-        `"${entry.reflection.replace(/"/g, '""')}"`,
-        `"${entry.storyChapter.replace(/"/g, '""')}"`
-      ].join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `storystudy-data-${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const importData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = (event) => {
       try {
-        const content = e.target?.result as string;
-        let importedEntries: JournalEntry[];
+        const json = event.target?.result as string;
+        const imported = JSON.parse(json);
 
-        if (file.type === 'application/json' || file.name.endsWith('.json')) {
-          const data = JSON.parse(content);
-          importedEntries = data.entries || data; // Support both wrapped and unwrapped formats
-        } else if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
-          // Parse CSV
-          const lines = content.split('\n');
-          const headers = lines[0].split(',');
-          
-          importedEntries = lines.slice(1)
-            .filter(line => line.trim())
-            .map((line, index) => {
-              const values = line.split(',').map(val => val.replace(/^"|"$/g, '').replace(/""/g, '"'));
-              return {
-                id: `imported-${Date.now()}-${index}`,
-                date: new Date(values[0]).toISOString(),
-                sessionNumber: parseInt(values[1]) || 0,
-                focusRating: parseInt(values[2]) || 3,
-                mood: values[3] || 'neutral',
-                reflection: values[4] || '',
-                storyOutcome: '',
-                storyChapter: values[5] || 'Chapter 1'
-              };
-            });
-        } else {
-          throw new Error('Unsupported file format. Please use JSON or CSV files.');
+        // Validate import data
+        if (!imported.type || !imported.version || !imported.data) {
+          throw new Error('Invalid import file format');
         }
 
-        // Validate imported data
-        if (!Array.isArray(importedEntries)) {
-          throw new Error('Invalid data format');
+        // Import based on type
+        switch (imported.type) {
+          case 'journal':
+            localStorage.setItem('journal-entries', JSON.stringify(imported.data));
+            break;
+
+          case 'flashcards':
+            localStorage.setItem('flashcards', JSON.stringify(imported.data));
+            break;
+
+          case 'settings':
+            if (imported.data.pomodoroPresets) {
+              localStorage.setItem('pomodoro-presets', JSON.stringify(imported.data.pomodoroPresets));
+            }
+            if (imported.data.accessibilitySettings) {
+              localStorage.setItem('accessibility-settings', JSON.stringify(imported.data.accessibilitySettings));
+            }
+            if (imported.data.language) {
+              localStorage.setItem('language', imported.data.language);
+            }
+            if (imported.data.notificationsEnabled !== undefined) {
+              localStorage.setItem('notifications-enabled', imported.data.notificationsEnabled);
+            }
+            break;
+
+          case 'complete-backup':
+            if (imported.data.journal) {
+              localStorage.setItem('journal-entries', JSON.stringify(imported.data.journal));
+            }
+            if (imported.data.flashcards) {
+              localStorage.setItem('flashcards', JSON.stringify(imported.data.flashcards));
+            }
+            if (imported.data.scheduledSessions) {
+              localStorage.setItem('scheduled-sessions', JSON.stringify(imported.data.scheduledSessions));
+            }
+            if (imported.data.goals) {
+              localStorage.setItem('goals', JSON.stringify(imported.data.goals));
+            }
+            if (imported.data.pomodoroPresets) {
+              localStorage.setItem('pomodoro-presets', JSON.stringify(imported.data.pomodoroPresets));
+            }
+            if (imported.data.accessibilitySettings) {
+              localStorage.setItem('accessibility-settings', JSON.stringify(imported.data.accessibilitySettings));
+            }
+            if (imported.data.language) {
+              localStorage.setItem('language', imported.data.language);
+            }
+            if (imported.data.notificationsEnabled !== undefined) {
+              localStorage.setItem('notifications-enabled', imported.data.notificationsEnabled);
+            }
+            if (imported.data.stats) {
+              if (imported.data.stats.totalSessions) {
+                localStorage.setItem('total-sessions', imported.data.stats.totalSessions);
+              }
+              if (imported.data.stats.totalStudyTime) {
+                localStorage.setItem('total-study-time', imported.data.stats.totalStudyTime);
+              }
+              if (imported.data.stats.currentStreak) {
+                localStorage.setItem('current-streak', imported.data.stats.currentStreak);
+              }
+            }
+            break;
+
+          default:
+            throw new Error('Unknown import type');
         }
 
-        // Ensure all entries have required fields
-        const validEntries = importedEntries.filter(entry => 
-          entry.id && entry.date && typeof entry.focusRating === 'number'
-        );
-
-        if (validEntries.length === 0) {
-          throw new Error('No valid entries found in the file');
-        }
-
-        onImport(validEntries);
         setImportStatus('success');
-        setImportMessage(`Successfully imported ${validEntries.length} entries`);
-        
-        // Reset file input
-        event.target.value = '';
-        
+        setMessage('Data imported successfully! Reload the page to see changes.');
+        setTimeout(() => {
+          setImportStatus('idle');
+          setMessage('');
+        }, 5000);
       } catch (error) {
+        console.error('Import failed:', error);
         setImportStatus('error');
-        setImportMessage(error instanceof Error ? error.message : 'Failed to import data');
+        setMessage('Import failed. Please check the file format.');
+        setTimeout(() => {
+          setImportStatus('idle');
+          setMessage('');
+        }, 3000);
       }
     };
-
     reader.readAsText(file);
   };
 
-  const generateSampleData = () => {
-    const sampleEntries: JournalEntry[] = [
-      {
-        id: 'sample-1',
-        date: new Date().toISOString(),
-        sessionNumber: 1,
-        focusRating: 4,
-        mood: 'focused',
-        reflection: 'Great study session today!',
-        storyOutcome: 'The hero strikes a powerful blow against the dragon!',
-        storyChapter: 'Chapter 1: The Dragon Awakens'
-      },
-      {
-        id: 'sample-2',
-        date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-        sessionNumber: 2,
-        focusRating: 3,
-        mood: 'determined',
-        reflection: 'Had some distractions but pushed through.',
-        storyOutcome: 'The battle continues with renewed determination.',
-        storyChapter: 'Chapter 1: The Dragon Awakens'
-      }
-    ];
-
-    onImport(sampleEntries);
-    setImportStatus('success');
-    setImportMessage('Sample data imported successfully');
-  };
-
   return (
-    <div className="space-y-6">
-      {/* Export Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Download className="w-5 h-5 text-blue-500" />
-            Export Your Data
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Download your study data for backup or analysis. Choose your preferred format.
+    <div className="min-h-screen bg-gradient-to-br from-cyan-50 to-blue-50 p-6">
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">
+            💾 Data Management
+          </h1>
+          <p className="text-gray-600">
+            Export your data for backup or import from a previous export
           </p>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-              <Button
-                onClick={exportToJSON}
-                className="w-full justify-start"
-                variant="outline"
-                disabled={entries.length === 0}
-              >
-                <Database className="w-4 h-4 mr-2" />
-                Export as JSON
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {entries.length} entries
-                </span>
-              </Button>
-            </motion.div>
-            
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-              <Button
-                onClick={exportToCSV}
-                className="w-full justify-start"
-                variant="outline"
-                disabled={entries.length === 0}
-              >
-                <FileText className="w-4 h-4 mr-2" />
-                Export as CSV
-                <span className="ml-auto text-xs text-muted-foreground">
-                  Spreadsheet
-                </span>
-              </Button>
-            </motion.div>
-          </div>
+        </div>
 
-          {entries.length === 0 && (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                Complete some study sessions first to have data to export.
-              </AlertDescription>
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Import Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Upload className="w-5 h-5 text-green-500" />
-            Import Data
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Import previously exported data or restore from backup. Supports JSON and CSV formats.
-          </p>
-
-          <div className="space-y-3">
-            <div>
-              <Label htmlFor="import-file">Choose File</Label>
-              <Input
-                id="import-file"
-                type="file"
-                accept=".json,.csv"
-                onChange={handleFileImport}
-                className="mt-1"
-              />
-            </div>
-
-            {importStatus !== 'idle' && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-              >
-                <Alert variant={importStatus === 'success' ? 'default' : 'destructive'}>
-                  {importStatus === 'success' ? (
-                    <CheckCircle className="h-4 w-4" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4" />
-                  )}
-                  <AlertDescription>{importMessage}</AlertDescription>
-                </Alert>
-              </motion.div>
+        {/* Status Messages */}
+        {message && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`mb-6 p-4 rounded-xl flex items-center gap-3 ${
+              exportStatus === 'success' || importStatus === 'success'
+                ? 'bg-green-100 text-green-800'
+                : 'bg-red-100 text-red-800'
+            }`}
+          >
+            {(exportStatus === 'success' || importStatus === 'success') ? (
+              <CheckCircle className="w-5 h-5" />
+            ) : (
+              <AlertCircle className="w-5 h-5" />
             )}
+            <span className="font-medium">{message}</span>
+          </motion.div>
+        )}
 
-            <div className="border-t pt-4">
-              <p className="text-sm text-muted-foreground mb-2">
-                Don't have data to import? Try our sample data:
-              </p>
-              <Button variant="outline" size="sm" onClick={generateSampleData}>
-                Load Sample Data
-              </Button>
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Export Section */}
+          <div className="bg-white rounded-2xl shadow-lg p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-blue-100 rounded-xl">
+                <Download className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Export Data</h2>
+                <p className="text-sm text-gray-600">Download your data as JSON</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => exportData('journal')}
+                className="w-full p-4 border-2 border-gray-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <FileJson className="w-5 h-5 text-blue-600" />
+                  <div>
+                    <div className="font-semibold text-gray-900">Journal Entries</div>
+                    <div className="text-sm text-gray-600">Export all your study reflections</div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => exportData('flashcards')}
+                className="w-full p-4 border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:bg-purple-50 transition-all text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <FileJson className="w-5 h-5 text-purple-600" />
+                  <div>
+                    <div className="font-semibold text-gray-900">Flashcards</div>
+                    <div className="text-sm text-gray-600">Export your flashcard deck</div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => exportData('settings')}
+                className="w-full p-4 border-2 border-gray-200 rounded-xl hover:border-green-400 hover:bg-green-50 transition-all text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <FileJson className="w-5 h-5 text-green-600" />
+                  <div>
+                    <div className="font-semibold text-gray-900">Settings</div>
+                    <div className="text-sm text-gray-600">Export your preferences</div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => exportData('all')}
+                className="w-full p-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-shadow"
+              >
+                <div className="flex items-center gap-3">
+                  <Database className="w-5 h-5" />
+                  <div>
+                    <div className="font-semibold">Complete Backup</div>
+                    <div className="text-sm opacity-90">Export everything</div>
+                  </div>
+                </div>
+              </button>
             </div>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Data Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Current Data</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-            <div>
-              <p className="text-2xl font-medium">{entries.length}</p>
-              <p className="text-sm text-muted-foreground">Total Sessions</p>
+          {/* Import Section */}
+          <div className="bg-white rounded-2xl shadow-lg p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-green-100 rounded-xl">
+                <Upload className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Import Data</h2>
+                <p className="text-sm text-gray-600">Restore from a backup file</p>
+              </div>
             </div>
-            <div>
-              <p className="text-2xl font-medium">
-                {entries.length > 0 ? new Date(Math.min(...entries.map(e => new Date(e.date).getTime()))).toLocaleDateString() : '-'}
-              </p>
-              <p className="text-sm text-muted-foreground">First Session</p>
-            </div>
-            <div>
-              <p className="text-2xl font-medium">
-                {entries.length > 0 ? new Date(Math.max(...entries.map(e => new Date(e.date).getTime()))).toLocaleDateString() : '-'}
-              </p>
-              <p className="text-sm text-muted-foreground">Latest Session</p>
-            </div>
-            <div>
-              <p className="text-2xl font-medium">
-                {entries.length > 0 ? Math.round((entries.reduce((sum, e) => sum + e.focusRating, 0) / entries.length) * 10) / 10 : '-'}
-              </p>
-              <p className="text-sm text-muted-foreground">Avg Focus</p>
+
+            <div className="space-y-4">
+              <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-green-400 hover:bg-green-50 transition-all">
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={importData}
+                  className="hidden"
+                  id="import-file"
+                />
+                <label
+                  htmlFor="import-file"
+                  className="cursor-pointer flex flex-col items-center gap-3"
+                >
+                  <Upload className="w-12 h-12 text-gray-400" />
+                  <div>
+                    <div className="font-semibold text-gray-900 mb-1">
+                      Choose a backup file
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      Select a .json file exported from StoryStudy
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                <div className="flex gap-3">
+                  <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-yellow-800">
+                    <div className="font-semibold mb-1">⚠️ Important</div>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Importing will merge with existing data</li>
+                      <li>Reload the page after importing</li>
+                      <li>Keep your original file as backup</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* Info Section */}
+        <div className="mt-6 bg-white rounded-2xl shadow-lg p-8">
+          <h3 className="text-xl font-bold text-gray-900 mb-4">
+            📖 Data Management Tips
+          </h3>
+          <div className="grid md:grid-cols-2 gap-6 text-sm text-gray-700">
+            <div>
+              <h4 className="font-semibold mb-2">Regular Backups</h4>
+              <p>Export your data weekly to prevent data loss. Store backups in a safe location.</p>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-2">File Format</h4>
+              <p>All exports are in JSON format, which is human-readable and portable.</p>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-2">Sync Across Devices</h4>
+              <p>Export from one device and import on another to keep your data synchronized.</p>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-2">Selective Export</h4>
+              <p>Choose specific data types to export only what you need.</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

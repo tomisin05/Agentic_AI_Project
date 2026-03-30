@@ -1,42 +1,48 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Textarea } from "./ui/textarea";
 import { Badge } from "./ui/badge";
+import { Checkbox } from "./ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Label } from "./ui/label";
-import { GoalManager, StudyGoal, GoalTask } from '../lib/goalSystem';
-import { Target, CheckCircle2 } from 'lucide-react';
+import { Target, CheckCircle2 } from "lucide-react";
+import { getGoalsFromStorage, Goal, Task } from "../lib/goalSystem";
 
 interface CheckInModalProps {
   isOpen: boolean;
   onClose: (data: { 
     focusRating: number; 
     reflection: string; 
-    mood: string;
+    mood: string; 
+    taskCompleted?: boolean;
     goalId?: string;
     taskId?: string;
-    progressMade: boolean;
-    taskCompleted: boolean;
+    madeProgress?: boolean;
   }) => void;
   sessionNumber: number;
   focusLevel: number;
-  sessionDuration?: number; // minutes
+  hasTask?: boolean;
 }
 
-export function CheckInModal({ isOpen, onClose, sessionNumber, focusLevel, sessionDuration = 25 }: CheckInModalProps) {
+export function CheckInModal({ isOpen, onClose, sessionNumber, focusLevel, hasTask }: CheckInModalProps) {
   const [selectedRating, setSelectedRating] = useState(focusLevel);
   const [reflection, setReflection] = useState('');
   const [selectedMood, setSelectedMood] = useState('');
+  const [taskCompleted, setTaskCompleted] = useState(false);
+  const [madeProgress, setMadeProgress] = useState(false);
+  const [goals, setGoals] = useState<Goal[]>([]);
   const [selectedGoalId, setSelectedGoalId] = useState<string>('');
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
-  const [progressMade, setProgressMade] = useState(false);
-  const [taskCompleted, setTaskCompleted] = useState(false);
 
-  const activeGoals = GoalManager.getActiveGoals();
-  const selectedGoal = activeGoals.find(g => g.id === selectedGoalId);
-  const availableTasks = selectedGoal?.tasks.filter(t => t.status !== 'completed') || [];
+  useEffect(() => {
+    if (isOpen) {
+      const loadedGoals = getGoalsFromStorage();
+      const activeGoals = loadedGoals.filter(g => !g.isArchived && !g.completedAt);
+      setGoals(activeGoals);
+    }
+  }, [isOpen]);
 
   const moods = [
     { emoji: '😊', label: 'Happy', value: 'happy' },
@@ -52,19 +58,19 @@ export function CheckInModal({ isOpen, onClose, sessionNumber, focusLevel, sessi
       focusRating: selectedRating,
       reflection,
       mood: selectedMood || 'neutral',
-      goalId: selectedGoalId || undefined,
-      taskId: selectedTaskId || undefined,
-      progressMade,
-      taskCompleted
+      taskCompleted: hasTask ? taskCompleted : undefined,
+      goalId: selectedGoalId,
+      taskId: selectedTaskId,
+      madeProgress: madeProgress
     });
     // Reset form
     setReflection('');
     setSelectedMood('');
     setSelectedRating(focusLevel);
+    setTaskCompleted(false);
+    setMadeProgress(false);
     setSelectedGoalId('');
     setSelectedTaskId('');
-    setProgressMade(false);
-    setTaskCompleted(false);
   };
 
   const getFocusDescription = (rating: number) => {
@@ -80,7 +86,7 @@ export function CheckInModal({ isOpen, onClose, sessionNumber, focusLevel, sessi
 
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Session {sessionNumber} Complete! 🎉</DialogTitle>
           <DialogDescription>
@@ -89,81 +95,6 @@ export function CheckInModal({ isOpen, onClose, sessionNumber, focusLevel, sessi
         </DialogHeader>
 
         <div className="space-y-6">
-          {/* Goal & Task Selection */}
-          {activeGoals.length > 0 && (
-            <Card className="p-4 bg-blue-50 border-blue-200">
-              <div className="flex items-center gap-2 mb-3">
-                <Target className="w-4 h-4 text-blue-600" />
-                <h4 className="font-medium">Link to Goal</h4>
-              </div>
-              
-              <div className="space-y-3">
-                <div>
-                  <Label htmlFor="goal-select">Which goal were you working on?</Label>
-                  <Select value={selectedGoalId} onValueChange={setSelectedGoalId}>
-                    <SelectTrigger id="goal-select">
-                      <SelectValue placeholder="Select a goal (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activeGoals.map(goal => (
-                        <SelectItem key={goal.id} value={goal.id}>
-                          {goal.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {selectedGoal && availableTasks.length > 0 && (
-                  <div>
-                    <Label htmlFor="task-select">Specific task?</Label>
-                    <Select value={selectedTaskId} onValueChange={setSelectedTaskId}>
-                      <SelectTrigger id="task-select">
-                        <SelectValue placeholder="Select a task (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableTasks.map(task => (
-                          <SelectItem key={task.id} value={task.id}>
-                            {task.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {selectedGoalId && (
-                  <div className="flex items-center gap-4 pt-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={progressMade}
-                        onChange={(e) => setProgressMade(e.target.checked)}
-                        className="w-4 h-4 rounded"
-                      />
-                      <span className="text-sm">Made progress</span>
-                    </label>
-                    
-                    {selectedTaskId && (
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={taskCompleted}
-                          onChange={(e) => setTaskCompleted(e.target.checked)}
-                          className="w-4 h-4 rounded"
-                        />
-                        <span className="text-sm flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" />
-                          Completed task
-                        </span>
-                      </label>
-                    )}
-                  </div>
-                )}
-              </div>
-            </Card>
-          )}
-
           {/* Focus Rating */}
           <Card className="p-4">
             <h4 className="mb-3">Focus Level</h4>
@@ -208,6 +139,25 @@ export function CheckInModal({ isOpen, onClose, sessionNumber, focusLevel, sessi
             </div>
           </Card>
 
+          {/* Task Completion */}
+          {hasTask && (
+            <Card className="p-4">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="task-completed"
+                  checked={taskCompleted}
+                  onCheckedChange={(checked) => setTaskCompleted(checked as boolean)}
+                />
+                <label
+                  htmlFor="task-completed"
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                >
+                  ✅ I completed my task this session
+                </label>
+              </div>
+            </Card>
+          )}
+
           {/* Reflection */}
           <div>
             <label className="block text-sm font-medium mb-2">
@@ -220,6 +170,76 @@ export function CheckInModal({ isOpen, onClose, sessionNumber, focusLevel, sessi
               rows={3}
             />
           </div>
+
+          {/* Goal Selection */}
+          {goals.length > 0 && (
+            <Card className="p-4">
+              <h4 className="mb-3">Select a Goal</h4>
+              <Select
+                value={selectedGoalId}
+                onValueChange={(value) => {
+                  setSelectedGoalId(value);
+                  setSelectedTaskId('');
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a goal">
+                    {selectedGoalId ? goals.find(g => g.id === selectedGoalId)?.title : 'Select a goal'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {goals.map(goal => (
+                    <SelectItem key={goal.id} value={goal.id}>
+                      {goal.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Card>
+          )}
+
+          {/* Task Selection */}
+          {selectedGoalId && goals.find(g => g.id === selectedGoalId)?.tasks.length > 0 && (
+            <Card className="p-4">
+              <h4 className="mb-3">Select a Task</h4>
+              <Select
+                value={selectedTaskId}
+                onValueChange={(value) => setSelectedTaskId(value)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a task">
+                    {selectedTaskId ? goals.find(g => g.id === selectedGoalId)?.tasks.find(t => t.id === selectedTaskId)?.title : 'Select a task'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {goals.find(g => g.id === selectedGoalId)?.tasks.map(task => (
+                    <SelectItem key={task.id} value={task.id}>
+                      {task.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Card>
+          )}
+
+          {/* Made Progress */}
+          {selectedTaskId && (
+            <Card className="p-4">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="made-progress"
+                  checked={madeProgress}
+                  onCheckedChange={(checked) => setMadeProgress(checked as boolean)}
+                />
+                <label
+                  htmlFor="made-progress"
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                >
+                  ✅ I made progress on this task
+                </label>
+              </div>
+            </Card>
+          )}
 
           {/* Summary */}
           <Card className="p-3 bg-muted/30">

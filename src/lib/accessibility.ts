@@ -1,338 +1,350 @@
-// Accessibility utilities and constants for the Pomodoro study app
+/**
+ * Accessibility utilities and system preferences detection
+ */
 
 export interface AccessibilitySettings {
-  reduceMotion: boolean;
+  // Visual
   highContrast: boolean;
-  screenReaderOptimized: boolean;
-  keyboardNavigationEnabled: boolean;
+  reducedMotion: boolean;
   fontSize: 'small' | 'medium' | 'large' | 'extra-large';
-  soundEnabled: boolean;
-  autoplayEnabled: boolean;
-}
-
-export const defaultAccessibilitySettings: AccessibilitySettings = {
-  reduceMotion: false,
-  highContrast: false,
-  screenReaderOptimized: false,
-  keyboardNavigationEnabled: true,
-  fontSize: 'medium',
-  soundEnabled: true,
-  autoplayEnabled: true,
-};
-
-// ARIA labels and descriptions
-export const ariaLabels = {
-  // Timer
-  timer: {
-    start: 'Start study session timer',
-    pause: 'Pause study session timer',
-    reset: 'Reset timer to beginning',
-    skipSession: 'Skip current session for demo purposes',
-    toggleDemo: 'Toggle demo mode for quick navigation',
-    focusIncrease: 'Increase focus level rating',
-    focusDecrease: 'Decrease focus level rating',
-  },
   
-  // Focus tracking
-  focus: {
-    level: (level: number) => `Current focus level: ${level} out of 5`,
-    tracker: 'Rate your current focus level from 1 to 5',
-    distraction: (count: number) => `${count} distractions detected this session`,
-  },
+  // Audio
+  soundEnabled: boolean;
+  audioDescriptions: boolean;
   
   // Navigation
-  navigation: {
-    mainMenu: 'Main navigation menu',
-    studyView: 'Switch to study view',
-    journalView: 'Switch to journal view',
-    statsView: 'Switch to statistics view',
-    flashcardsView: 'Switch to flashcards view',
-    schedulerView: 'Switch to scheduler view',
-    settingsView: 'Switch to settings view',
-  },
+  keyboardNavigation: boolean;
+  screenReaderOptimized: boolean;
   
-  // Study components
-  study: {
-    sessionComplete: 'Study session completed',
-    breakTime: 'Break time started',
-    storyProgression: 'Story progression based on focus level',
-    checkIn: 'Session reflection and check-in modal',
-  },
-  
-  // Forms
-  forms: {
-    required: 'This field is required',
-    optional: 'This field is optional',
-    save: 'Save changes',
-    cancel: 'Cancel and discard changes',
-    delete: 'Delete item',
-    export: 'Export data',
-    import: 'Import data',
-  },
-  
-  // Flashcards
-  flashcards: {
-    showAnswer: 'Reveal the answer to this flashcard',
-    hideAnswer: 'Hide the answer to this flashcard',
-    nextCard: 'Move to next flashcard',
-    previousCard: 'Move to previous flashcard',
-    difficulty: (level: number, description: string) => `Rate difficulty as ${level}: ${description}`,
-    cardProgress: (current: number, total: number) => `Card ${current} of ${total}`,
-  },
-  
-  // Calendar/Scheduler
-  calendar: {
-    selectDate: 'Select date for scheduling',
-    scheduleSession: 'Schedule a new study session',
-    editSession: 'Edit scheduled session',
-    deleteSession: 'Delete scheduled session',
-    exportCalendar: 'Export session to calendar application',
-  }
-};
-
-// Screen reader announcements
-export const announcements = {
-  sessionStarted: 'Study session started',
-  sessionPaused: 'Study session paused',
-  sessionCompleted: 'Study session completed',
-  breakStarted: 'Break time started',
-  breakCompleted: 'Break completed, ready for next study session',
-  focusLevelChanged: (level: number) => `Focus level updated to ${level} out of 5`,
-  timerWarning: (minutes: number) => `${minutes} minutes remaining in session`,
-  distractionDetected: 'Distraction detected, please return focus to your studies',
-  storyProgression: (success: boolean) => success ? 'Story progresses successfully' : 'Story encounters challenge',
-};
-
-// Keyboard shortcuts
-export const keyboardShortcuts = {
-  'space': 'Toggle timer (start/pause)',
-  'r': 'Reset timer',
-  's': 'Skip session (demo mode)',
-  'd': 'Toggle demo mode',
-  'j': 'Open journal view',
-  'f': 'Open flashcards',
-  'c': 'Open calendar/scheduler',
-  'escape': 'Close modal or return to main view',
-  'enter': 'Activate focused element',
-  'tab': 'Navigate to next element',
-  'shift+tab': 'Navigate to previous element',
-  'arrow keys': 'Navigate between options',
-};
-
-// Color contrast utilities
-export const getContrastText = (backgroundColor: string): string => {
-  // Simple implementation - in production, use proper color contrast calculation
-  const darkColors = ['#000', '#333', '#030213', '#1a1a1a'];
-  const isDark = darkColors.some(color => backgroundColor.includes(color));
-  return isDark ? '#ffffff' : '#000000';
-};
-
-// Focus management utilities
-export class FocusManager {
-  private static focusHistory: HTMLElement[] = [];
-  
-  static saveFocus(): void {
-    const activeElement = document.activeElement as HTMLElement;
-    if (activeElement && activeElement !== document.body) {
-      this.focusHistory.push(activeElement);
-    }
-  }
-  
-  static restoreFocus(): void {
-    const lastFocused = this.focusHistory.pop();
-    if (lastFocused && document.contains(lastFocused)) {
-      lastFocused.focus();
-    }
-  }
-  
-  static trapFocus(container: HTMLElement): () => void {
-    const focusableElements = container.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    ) as NodeListOf<HTMLElement>;
-    
-    const firstElement = focusableElements[0];
-    const lastElement = focusableElements[focusableElements.length - 1];
-    
-    const handleTabKey = (e: KeyboardEvent) => {
-      if (e.key === 'Tab') {
-        if (e.shiftKey) {
-          if (document.activeElement === firstElement) {
-            e.preventDefault();
-            lastElement.focus();
-          }
-        } else {
-          if (document.activeElement === lastElement) {
-            e.preventDefault();
-            firstElement.focus();
-          }
-        }
-      }
-    };
-    
-    container.addEventListener('keydown', handleTabKey);
-    
-    // Focus first element
-    if (firstElement) {
-      firstElement.focus();
-    }
-    
-    // Return cleanup function
-    return () => {
-      container.removeEventListener('keydown', handleTabKey);
-    };
-  }
+  // Focus
+  focusIndicators: boolean;
 }
 
-// Screen reader utilities
-export class ScreenReaderAnnouncer {
-  private static liveRegion: HTMLElement | null = null;
-  
-  static initialize(): void {
-    if (!this.liveRegion) {
-      this.liveRegion = document.createElement('div');
-      this.liveRegion.setAttribute('aria-live', 'polite');
-      this.liveRegion.setAttribute('aria-atomic', 'true');
-      this.liveRegion.setAttribute('class', 'sr-only');
-      this.liveRegion.style.position = 'absolute';
-      this.liveRegion.style.left = '-10000px';
-      this.liveRegion.style.width = '1px';
-      this.liveRegion.style.height = '1px';
-      this.liveRegion.style.overflow = 'hidden';
-      document.body.appendChild(this.liveRegion);
-    }
+export const DEFAULT_ACCESSIBILITY_SETTINGS: AccessibilitySettings = {
+  highContrast: false,
+  reducedMotion: false,
+  fontSize: 'medium',
+  soundEnabled: true,
+  audioDescriptions: false,
+  keyboardNavigation: true,
+  screenReaderOptimized: false,
+  focusIndicators: true
+};
+
+/**
+ * Accessibility System
+ */
+class AccessibilitySystem {
+  private settings: AccessibilitySettings;
+  private listeners: Map<string, Function[]> = new Map();
+
+  constructor() {
+    this.settings = this.loadSettings();
+    this.applySystemPreferences();
+    this.setupMediaQueryListeners();
   }
-  
-  static announce(message: string, priority: 'polite' | 'assertive' = 'polite'): void {
-    if (!this.liveRegion) {
-      this.initialize();
-    }
-    
-    if (this.liveRegion) {
-      this.liveRegion.setAttribute('aria-live', priority);
-      this.liveRegion.textContent = message;
-      
-      // Clear after announcement
-      setTimeout(() => {
-        if (this.liveRegion) {
-          this.liveRegion.textContent = '';
-        }
-      }, 1000);
-    }
-  }
-}
 
-// Motion preferences
-export const getReducedMotionSettings = (): boolean => {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-};
-
-// High contrast detection
-export const getHighContrastPreference = (): boolean => {
-  return window.matchMedia('(prefers-contrast: high)').matches;
-};
-
-// Text size utilities
-export const fontSizeClasses = {
-  small: 'text-sm',
-  medium: 'text-base',
-  large: 'text-lg',
-  'extra-large': 'text-xl',
-};
-
-// Accessibility settings management
-export class AccessibilityManager {
-  private static readonly STORAGE_KEY = 'pomodoro-accessibility-settings';
-  
-  static getSettings(): AccessibilitySettings {
-    try {
-      const stored = localStorage.getItem(this.STORAGE_KEY);
-      if (stored) {
-        return { ...defaultAccessibilitySettings, ...JSON.parse(stored) };
+  /**
+   * Load settings from localStorage
+   */
+  private loadSettings(): AccessibilitySettings {
+    const stored = localStorage.getItem('accessibility-settings');
+    if (stored) {
+      try {
+        return { ...DEFAULT_ACCESSIBILITY_SETTINGS, ...JSON.parse(stored) };
+      } catch {
+        return { ...DEFAULT_ACCESSIBILITY_SETTINGS };
       }
-    } catch (error) {
-      console.error('Failed to load accessibility settings:', error);
     }
-    
-    // Auto-detect system preferences
-    return {
-      ...defaultAccessibilitySettings,
-      reduceMotion: getReducedMotionSettings(),
-      highContrast: getHighContrastPreference(),
-    };
+    return { ...DEFAULT_ACCESSIBILITY_SETTINGS };
   }
-  
-  static saveSettings(settings: AccessibilitySettings): void {
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(settings));
-    } catch (error) {
-      console.error('Failed to save accessibility settings:', error);
+
+  /**
+   * Save settings to localStorage
+   */
+  private saveSettings(): void {
+    localStorage.setItem('accessibility-settings', JSON.stringify(this.settings));
+    this.applySettings();
+    this.notifyListeners('settings-changed');
+  }
+
+  /**
+   * Detect and apply system preferences
+   */
+  private applySystemPreferences(): void {
+    // Check for prefers-reduced-motion
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      this.settings.reducedMotion = true;
+    }
+
+    // Check for prefers-contrast
+    if (window.matchMedia('(prefers-contrast: more)').matches) {
+      this.settings.highContrast = true;
     }
   }
-  
-  static applySettings(settings: AccessibilitySettings): void {
+
+  /**
+   * Setup media query listeners for system preference changes
+   */
+  private setupMediaQueryListeners(): void {
+    // Listen for reduced motion changes
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    motionQuery.addEventListener('change', (e) => {
+      if (e.matches) {
+        this.updateSetting('reducedMotion', true);
+      }
+    });
+
+    // Listen for contrast changes
+    const contrastQuery = window.matchMedia('(prefers-contrast: more)');
+    contrastQuery.addEventListener('change', (e) => {
+      if (e.matches) {
+        this.updateSetting('highContrast', true);
+      }
+    });
+  }
+
+  /**
+   * Apply settings to document
+   */
+  private applySettings(): void {
     const root = document.documentElement;
-    
-    // Apply font size
-    root.style.fontSize = settings.fontSize === 'small' ? '14px' : 
-                         settings.fontSize === 'large' ? '18px' :
-                         settings.fontSize === 'extra-large' ? '20px' : '16px';
-    
-    // Apply high contrast
-    if (settings.highContrast) {
+
+    // High contrast
+    if (this.settings.highContrast) {
       root.classList.add('high-contrast');
     } else {
       root.classList.remove('high-contrast');
     }
-    
-    // Apply reduced motion
-    if (settings.reduceMotion) {
-      root.classList.add('reduce-motion');
+
+    // Reduced motion
+    if (this.settings.reducedMotion) {
+      root.classList.add('reduced-motion');
     } else {
-      root.classList.remove('reduce-motion');
+      root.classList.remove('reduced-motion');
     }
+
+    // Font size
+    root.classList.remove('font-small', 'font-medium', 'font-large', 'font-extra-large');
+    root.classList.add(`font-${this.settings.fontSize}`);
+
+    // Focus indicators
+    if (this.settings.focusIndicators) {
+      root.classList.add('enhanced-focus');
+    } else {
+      root.classList.remove('enhanced-focus');
+    }
+
+    // Screen reader optimization
+    if (this.settings.screenReaderOptimized) {
+      root.classList.add('screen-reader-optimized');
+    } else {
+      root.classList.remove('screen-reader-optimized');
+    }
+  }
+
+  /**
+   * Get current settings
+   */
+  getSettings(): AccessibilitySettings {
+    return { ...this.settings };
+  }
+
+  /**
+   * Update a specific setting
+   */
+  updateSetting<K extends keyof AccessibilitySettings>(
+    key: K,
+    value: AccessibilitySettings[K]
+  ): void {
+    this.settings[key] = value;
+    this.saveSettings();
+  }
+
+  /**
+   * Update multiple settings at once
+   */
+  updateSettings(updates: Partial<AccessibilitySettings>): void {
+    this.settings = { ...this.settings, ...updates };
+    this.saveSettings();
+  }
+
+  /**
+   * Reset to defaults
+   */
+  resetToDefaults(): void {
+    this.settings = { ...DEFAULT_ACCESSIBILITY_SETTINGS };
+    this.saveSettings();
+  }
+
+  /**
+   * Subscribe to setting changes
+   */
+  subscribe(event: string, callback: Function): () => void {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    this.listeners.get(event)!.push(callback);
+
+    // Return unsubscribe function
+    return () => {
+      const callbacks = this.listeners.get(event);
+      if (callbacks) {
+        const index = callbacks.indexOf(callback);
+        if (index > -1) {
+          callbacks.splice(index, 1);
+        }
+      }
+    };
+  }
+
+  /**
+   * Notify listeners of changes
+   */
+  private notifyListeners(event: string): void {
+    const callbacks = this.listeners.get(event);
+    if (callbacks) {
+      callbacks.forEach(callback => callback(this.settings));
+    }
+  }
+
+  /**
+   * Announce to screen readers
+   */
+  announceToScreenReader(message: string, priority: 'polite' | 'assertive' = 'polite'): void {
+    const announcement = document.createElement('div');
+    announcement.setAttribute('role', 'status');
+    announcement.setAttribute('aria-live', priority);
+    announcement.setAttribute('aria-atomic', 'true');
+    announcement.className = 'sr-only';
+    announcement.textContent = message;
+
+    document.body.appendChild(announcement);
+
+    // Remove after announcement
+    setTimeout(() => {
+      document.body.removeChild(announcement);
+    }, 1000);
+  }
+
+  /**
+   * Setup keyboard shortcuts
+   */
+  setupKeyboardShortcuts(shortcuts: Record<string, () => void>): () => void {
+    const handler = (e: KeyboardEvent) => {
+      if (!this.settings.keyboardNavigation) return;
+
+      const key = e.key.toLowerCase();
+      const withCtrl = e.ctrlKey || e.metaKey;
+      const withShift = e.shiftKey;
+
+      let shortcutKey = key;
+      if (withCtrl) shortcutKey = `ctrl+${key}`;
+      if (withShift) shortcutKey = `shift+${key}`;
+      if (withCtrl && withShift) shortcutKey = `ctrl+shift+${key}`;
+
+      if (shortcuts[shortcutKey]) {
+        e.preventDefault();
+        shortcuts[shortcutKey]();
+      }
+    };
+
+    document.addEventListener('keydown', handler);
+
+    // Return cleanup function
+    return () => {
+      document.removeEventListener('keydown', handler);
+    };
+  }
+
+  /**
+   * Trap focus within a container (for modals)
+   */
+  trapFocus(container: HTMLElement): () => void {
+    const focusableElements = container.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    
+    const firstElement = focusableElements[0] as HTMLElement;
+    const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
+
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        }
+      } else {
+        if (document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement.focus();
+        }
+      }
+    };
+
+    container.addEventListener('keydown', handler);
+    firstElement?.focus();
+
+    // Return cleanup function
+    return () => {
+      container.removeEventListener('keydown', handler);
+    };
+  }
+
+  /**
+   * Check if reduced motion is preferred
+   */
+  prefersReducedMotion(): boolean {
+    return this.settings.reducedMotion;
+  }
+
+  /**
+   * Get animation duration based on preferences
+   */
+  getAnimationDuration(defaultDuration: number): number {
+    return this.settings.reducedMotion ? 0 : defaultDuration;
   }
 }
 
-// Initialize accessibility features
-export const initializeAccessibility = (): void => {
-  ScreenReaderAnnouncer.initialize();
-  
-  const settings = AccessibilityManager.getSettings();
-  AccessibilityManager.applySettings(settings);
-  
-  // Add keyboard navigation styles
-  const style = document.createElement('style');
-  style.textContent = `
-    .focus-visible {
-      outline: 2px solid #3b82f6;
-      outline-offset: 2px;
+// Export singleton instance
+export const accessibilitySystem = new AccessibilitySystem();
+
+/**
+ * React hook for accessibility settings
+ */
+export function useAccessibility() {
+  const [settings, setSettings] = React.useState(accessibilitySystem.getSettings());
+
+  React.useEffect(() => {
+    const unsubscribe = accessibilitySystem.subscribe('settings-changed', (newSettings: AccessibilitySettings) => {
+      setSettings(newSettings);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  return {
+    settings,
+    updateSetting: (key: keyof AccessibilitySettings, value: any) => {
+      accessibilitySystem.updateSetting(key, value);
+    },
+    updateSettings: (updates: Partial<AccessibilitySettings>) => {
+      accessibilitySystem.updateSettings(updates);
+    },
+    resetToDefaults: () => {
+      accessibilitySystem.resetToDefaults();
+    },
+    announce: (message: string, priority?: 'polite' | 'assertive') => {
+      accessibilitySystem.announceToScreenReader(message, priority);
+    },
+    prefersReducedMotion: accessibilitySystem.prefersReducedMotion(),
+    getAnimationDuration: (defaultDuration: number) => {
+      return accessibilitySystem.getAnimationDuration(defaultDuration);
     }
-    
-    .sr-only {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    }
-    
-    .high-contrast {
-      --background: #ffffff;
-      --foreground: #000000;
-      --primary: #0000ff;
-      --secondary: #666666;
-      --border: #000000;
-    }
-    
-    .reduce-motion * {
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
-    }
-  `;
-  document.head.appendChild(style);
-};
+  };
+}
+
+// Add React import for the hook
+import React from 'react';

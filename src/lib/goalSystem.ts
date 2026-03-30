@@ -1,58 +1,36 @@
-// Goal-oriented study system
-// This connects all features (timer, flashcards, scheduler, story) to user objectives
+// Goal System - Complete goal management, progress tracking, and smart recommendations
 
 export type GoalType = 'exam' | 'project' | 'skill' | 'course' | 'certification' | 'personal';
 export type GoalPriority = 'low' | 'medium' | 'high' | 'critical';
 export type TaskStatus = 'not-started' | 'in-progress' | 'completed' | 'blocked';
+export type ActionType = 'deep-work' | 'review' | 'flashcards' | 'light-study';
 
-export interface StudyGoal {
+export interface Task {
   id: string;
   title: string;
-  type: GoalType;
-  subject: string;
   description?: string;
-  deadline?: Date;
-  priority: GoalPriority;
-  targetHours?: number; // Total hours needed
-  hoursCompleted: number;
-  createdAt: Date;
-  completedAt?: Date;
-  isActive: boolean;
-  
-  // Sub-tasks/milestones
-  tasks: GoalTask[];
-  
-  // Study plan
-  dailyCommitment?: number; // minutes per day
-  weeklyCommitment?: number; // sessions per week
-  preferredStudyTimes?: string[]; // e.g., ['morning', 'afternoon', 'evening']
-  
-  // Progress tracking
-  sessionsCompleted: number;
-  flashcardsCreated: number;
-  flashcardsMastered: number;
-  currentStreak: number;
-  
-  // Story integration
-  storyMilestones: string[];
-  currentChapter: number;
+  dueDate?: string;
+  status: TaskStatus;
+  estimatedHours?: number;
+  completedAt?: string;
 }
 
-export interface GoalTask {
+export interface Goal {
   id: string;
-  goalId: string;
   title: string;
-  description?: string;
-  status: TaskStatus;
-  estimatedMinutes?: number;
-  actualMinutes: number;
-  dueDate?: Date;
-  completedAt?: Date;
-  tags: string[];
-  
-  // Related resources
-  flashcardCount?: number;
-  notesLink?: string;
+  description: string;
+  type: GoalType;
+  priority: GoalPriority;
+  subject: string;
+  deadline?: string;
+  targetHours: number;
+  hoursCompleted: number;
+  dailyCommitmentMinutes: number;
+  tasks: Task[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  isArchived: boolean;
 }
 
 export interface GoalProgress {
@@ -62,461 +40,304 @@ export interface GoalProgress {
   totalTasks: number;
   hoursCompleted: number;
   targetHours: number;
-  daysUntilDeadline?: number;
-  onTrack: boolean;
+  daysRemaining?: number;
+  isOnTrack: boolean;
   recommendedDailyMinutes: number;
-  projectedCompletionDate?: Date;
 }
 
 export interface DailyRecommendation {
   goalId: string;
   goalTitle: string;
-  priority: number; // 1-10
-  recommendedAction: 'deep-work' | 'review' | 'flashcards' | 'light-study' | 'break';
-  suggestedDuration: number; // minutes
-  suggestedPreset: string;
-  reasoning: string;
-  urgency: 'low' | 'medium' | 'high' | 'critical';
+  urgency: 'critical' | 'high' | 'medium' | 'low';
+  recommendedAction: ActionType;
+  recommendedDuration: number; // in minutes
+  reason: string;
+  nextTask?: Task;
 }
 
-export interface SessionGoalLink {
-  sessionId: string;
-  goalId: string;
-  taskId?: string;
-  minutesWorked: number;
-  focusRating: number;
-  progressMade: boolean;
-  completedTask: boolean;
-  notes?: string;
-  timestamp: Date;
-}
+// Calculate goal progress
+export function calculateGoalProgress(goal: Goal): GoalProgress {
+  const tasksCompleted = goal.tasks.filter(t => t.status === 'completed').length;
+  const totalTasks = goal.tasks.length;
+  
+  // Progress is a combination of tasks completed and hours studied
+  const taskProgress = totalTasks > 0 ? (tasksCompleted / totalTasks) * 100 : 0;
+  const hourProgress = goal.targetHours > 0 ? (goal.hoursCompleted / goal.targetHours) * 100 : 0;
+  
+  // Weighted average: 60% tasks, 40% hours
+  const progressPercentage = totalTasks > 0 
+    ? (taskProgress * 0.6 + hourProgress * 0.4)
+    : hourProgress;
 
-// Goal Management
-export class GoalManager {
-  private static readonly STORAGE_KEY = 'pomodoro-study-goals';
-  private static readonly SESSIONS_KEY = 'pomodoro-goal-sessions';
+  let daysRemaining: number | undefined;
+  let isOnTrack = true;
+  let recommendedDailyMinutes = goal.dailyCommitmentMinutes;
 
-  // CRUD Operations
-  static getGoals(): StudyGoal[] {
-    try {
-      const stored = localStorage.getItem(this.STORAGE_KEY);
-      if (!stored) return [];
-      
-      const parsed = JSON.parse(stored);
-      return parsed.map((goal: any) => ({
-        ...goal,
-        deadline: goal.deadline ? new Date(goal.deadline) : undefined,
-        createdAt: new Date(goal.createdAt),
-        completedAt: goal.completedAt ? new Date(goal.completedAt) : undefined,
-        tasks: goal.tasks?.map((task: any) => ({
-          ...task,
-          dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-          completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
-        })) || []
-      }));
-    } catch (error) {
-      console.error('Failed to load goals:', error);
-      return [];
-    }
-  }
-
-  static saveGoals(goals: StudyGoal[]): void {
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(goals));
-    } catch (error) {
-      console.error('Failed to save goals:', error);
-    }
-  }
-
-  static createGoal(goalData: Omit<StudyGoal, 'id' | 'createdAt' | 'hoursCompleted' | 'sessionsCompleted' | 'flashcardsCreated' | 'flashcardsMastered' | 'currentStreak' | 'isActive' | 'storyMilestones' | 'currentChapter'>): StudyGoal {
-    const newGoal: StudyGoal = {
-      ...goalData,
-      id: crypto.randomUUID(),
-      createdAt: new Date(),
-      hoursCompleted: 0,
-      sessionsCompleted: 0,
-      flashcardsCreated: 0,
-      flashcardsMastered: 0,
-      currentStreak: 0,
-      isActive: true,
-      storyMilestones: [],
-      currentChapter: 1,
-      tasks: goalData.tasks || []
-    };
-
-    const goals = this.getGoals();
-    goals.push(newGoal);
-    this.saveGoals(goals);
-    
-    return newGoal;
-  }
-
-  static updateGoal(goalId: string, updates: Partial<StudyGoal>): void {
-    const goals = this.getGoals();
-    const index = goals.findIndex(g => g.id === goalId);
-    
-    if (index !== -1) {
-      goals[index] = { ...goals[index], ...updates };
-      this.saveGoals(goals);
-    }
-  }
-
-  static deleteGoal(goalId: string): void {
-    const goals = this.getGoals().filter(g => g.id !== goalId);
-    this.saveGoals(goals);
-  }
-
-  static getActiveGoals(): StudyGoal[] {
-    return this.getGoals().filter(g => g.isActive && !g.completedAt);
-  }
-
-  static getPrimaryGoal(): StudyGoal | null {
-    const activeGoals = this.getActiveGoals();
-    if (activeGoals.length === 0) return null;
-    
-    // Return highest priority goal with nearest deadline
-    return activeGoals.sort((a, b) => {
-      // First sort by priority
-      const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-      const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
-      if (priorityDiff !== 0) return priorityDiff;
-      
-      // Then by deadline
-      if (a.deadline && b.deadline) {
-        return a.deadline.getTime() - b.deadline.getTime();
-      }
-      if (a.deadline) return -1;
-      if (b.deadline) return 1;
-      
-      return 0;
-    })[0];
-  }
-
-  // Task Management
-  static addTask(goalId: string, taskData: Omit<GoalTask, 'id' | 'goalId' | 'actualMinutes' | 'status'>): GoalTask {
-    const newTask: GoalTask = {
-      ...taskData,
-      id: crypto.randomUUID(),
-      goalId,
-      actualMinutes: 0,
-      status: 'not-started'
-    };
-
-    const goals = this.getGoals();
-    const goal = goals.find(g => g.id === goalId);
-    
-    if (goal) {
-      goal.tasks.push(newTask);
-      this.saveGoals(goals);
-    }
-    
-    return newTask;
-  }
-
-  static updateTask(goalId: string, taskId: string, updates: Partial<GoalTask>): void {
-    const goals = this.getGoals();
-    const goal = goals.find(g => g.id === goalId);
-    
-    if (goal) {
-      const taskIndex = goal.tasks.findIndex(t => t.id === taskId);
-      if (taskIndex !== -1) {
-        goal.tasks[taskIndex] = { ...goal.tasks[taskIndex], ...updates };
-        
-        // If task completed, mark completion time
-        if (updates.status === 'completed' && !goal.tasks[taskIndex].completedAt) {
-          goal.tasks[taskIndex].completedAt = new Date();
-        }
-        
-        this.saveGoals(goals);
-      }
-    }
-  }
-
-  static deleteTask(goalId: string, taskId: string): void {
-    const goals = this.getGoals();
-    const goal = goals.find(g => g.id === goalId);
-    
-    if (goal) {
-      goal.tasks = goal.tasks.filter(t => t.id !== taskId);
-      this.saveGoals(goals);
-    }
-  }
-
-  // Session Linking
-  static linkSessionToGoal(sessionLink: SessionGoalLink): void {
-    try {
-      const stored = localStorage.getItem(this.SESSIONS_KEY);
-      const sessions = stored ? JSON.parse(stored) : [];
-      sessions.push(sessionLink);
-      localStorage.setItem(this.SESSIONS_KEY, JSON.stringify(sessions));
-
-      // Update goal progress
-      const goals = this.getGoals();
-      const goal = goals.find(g => g.id === sessionLink.goalId);
-      
-      if (goal) {
-        goal.sessionsCompleted += 1;
-        goal.hoursCompleted += sessionLink.minutesWorked / 60;
-        
-        // Update task progress if task was specified
-        if (sessionLink.taskId) {
-          const task = goal.tasks.find(t => t.id === sessionLink.taskId);
-          if (task) {
-            task.actualMinutes += sessionLink.minutesWorked;
-            if (sessionLink.completedTask) {
-              task.status = 'completed';
-              task.completedAt = new Date();
-            } else if (task.status === 'not-started') {
-              task.status = 'in-progress';
-            }
-          }
-        }
-        
-        this.saveGoals(goals);
-      }
-    } catch (error) {
-      console.error('Failed to link session to goal:', error);
-    }
-  }
-
-  static getGoalSessions(goalId: string): SessionGoalLink[] {
-    try {
-      const stored = localStorage.getItem(this.SESSIONS_KEY);
-      if (!stored) return [];
-      
-      const sessions = JSON.parse(stored);
-      return sessions
-        .filter((s: SessionGoalLink) => s.goalId === goalId)
-        .map((s: any) => ({
-          ...s,
-          timestamp: new Date(s.timestamp)
-        }));
-    } catch (error) {
-      console.error('Failed to get goal sessions:', error);
-      return [];
-    }
-  }
-
-  // Progress Calculation
-  static calculateProgress(goalId: string): GoalProgress {
-    const goal = this.getGoals().find(g => g.id === goalId);
-    
-    if (!goal) {
-      return {
-        goalId,
-        progressPercentage: 0,
-        tasksCompleted: 0,
-        totalTasks: 0,
-        hoursCompleted: 0,
-        targetHours: 0,
-        onTrack: false,
-        recommendedDailyMinutes: 0
-      };
-    }
-
-    const totalTasks = goal.tasks.length;
-    const tasksCompleted = goal.tasks.filter(t => t.status === 'completed').length;
-    const targetHours = goal.targetHours || 0;
-    const hoursCompleted = goal.hoursCompleted;
-
-    // Calculate progress percentage (weighted between tasks and hours)
-    let progressPercentage = 0;
-    if (totalTasks > 0 && targetHours > 0) {
-      const taskProgress = (tasksCompleted / totalTasks) * 100;
-      const hourProgress = (hoursCompleted / targetHours) * 100;
-      progressPercentage = (taskProgress * 0.6 + hourProgress * 0.4);
-    } else if (totalTasks > 0) {
-      progressPercentage = (tasksCompleted / totalTasks) * 100;
-    } else if (targetHours > 0) {
-      progressPercentage = (hoursCompleted / targetHours) * 100;
-    }
-
-    // Calculate days until deadline
-    let daysUntilDeadline: number | undefined;
-    let onTrack = true;
-    let recommendedDailyMinutes = 0;
-    let projectedCompletionDate: Date | undefined;
-
-    if (goal.deadline) {
-      const now = new Date();
-      daysUntilDeadline = Math.ceil((goal.deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      
-      if (targetHours > 0) {
-        const hoursRemaining = targetHours - hoursCompleted;
-        
-        if (daysUntilDeadline > 0) {
-          // Calculate if on track
-          const requiredDailyHours = hoursRemaining / daysUntilDeadline;
-          recommendedDailyMinutes = Math.ceil(requiredDailyHours * 60);
-          
-          // Consider on track if current pace meets deadline
-          const currentDailyAverage = goal.sessionsCompleted > 0 
-            ? (hoursCompleted * 60) / Math.max(1, (now.getTime() - goal.createdAt.getTime()) / (1000 * 60 * 60 * 24))
-            : 0;
-          
-          onTrack = currentDailyAverage >= recommendedDailyMinutes * 0.8; // 80% threshold
-          
-          // Project completion date based on current pace
-          if (currentDailyAverage > 0) {
-            const daysToComplete = (hoursRemaining * 60) / currentDailyAverage;
-            projectedCompletionDate = new Date(now.getTime() + daysToComplete * 24 * 60 * 60 * 1000);
-          }
-        }
-      }
-    } else if (goal.dailyCommitment && targetHours > 0) {
-      const hoursRemaining = targetHours - hoursCompleted;
-      const daysToComplete = (hoursRemaining * 60) / goal.dailyCommitment;
-      projectedCompletionDate = new Date(Date.now() + daysToComplete * 24 * 60 * 60 * 1000);
-      recommendedDailyMinutes = goal.dailyCommitment;
-    }
-
-    return {
-      goalId,
-      progressPercentage: Math.min(100, Math.max(0, progressPercentage)),
-      tasksCompleted,
-      totalTasks,
-      hoursCompleted,
-      targetHours,
-      daysUntilDeadline,
-      onTrack,
-      recommendedDailyMinutes,
-      projectedCompletionDate
-    };
-  }
-
-  // Recommendations
-  static getDailyRecommendations(): DailyRecommendation[] {
-    const activeGoals = this.getActiveGoals();
-    const recommendations: DailyRecommendation[] = [];
-
-    for (const goal of activeGoals) {
-      const progress = this.calculateProgress(goal.id);
-      let recommendedAction: DailyRecommendation['recommendedAction'] = 'deep-work';
-      let suggestedDuration = 25;
-      let suggestedPreset = 'classic';
-      let reasoning = '';
-      let urgency: DailyRecommendation['urgency'] = 'medium';
-      let priority = 5;
-
-      // Determine urgency
-      if (progress.daysUntilDeadline !== undefined) {
-        if (progress.daysUntilDeadline <= 2) {
-          urgency = 'critical';
-          priority = 10;
-        } else if (progress.daysUntilDeadline <= 7) {
-          urgency = 'high';
-          priority = 8;
-        } else if (progress.daysUntilDeadline <= 14) {
-          urgency = 'medium';
-          priority = 6;
-        } else {
-          urgency = 'low';
-          priority = 4;
-        }
-      }
-
-      // Adjust by priority
-      const priorityBoost = { critical: 3, high: 2, medium: 0, low: -1 };
-      priority += priorityBoost[goal.priority];
-
-      // Determine action based on progress and status
-      if (progress.progressPercentage > 70) {
-        recommendedAction = 'review';
-        suggestedDuration = 25;
-        suggestedPreset = 'classic';
-        reasoning = `You're ${Math.round(progress.progressPercentage)}% complete. Focus on reviewing and consolidating knowledge.`;
-      } else if (urgency === 'critical') {
-        recommendedAction = 'deep-work';
-        suggestedDuration = 50;
-        suggestedPreset = 'deep-work';
-        reasoning = `Deadline in ${progress.daysUntilDeadline} days! Deep focus session recommended.`;
-      } else if (!progress.onTrack && urgency !== 'low') {
-        recommendedAction = 'deep-work';
-        suggestedDuration = 50;
-        suggestedPreset = 'deep-work';
-        reasoning = `Behind schedule. Need ${progress.recommendedDailyMinutes} min/day to stay on track.`;
-      } else if (goal.flashcardsCreated > 0 && goal.flashcardsCreated > goal.flashcardsMastered * 2) {
-        recommendedAction = 'flashcards';
-        suggestedDuration = 15;
-        suggestedPreset = 'quick-study';
-        reasoning = 'Many flashcards need review. Quick study session recommended.';
-      } else {
-        recommendedAction = 'deep-work';
-        suggestedDuration = 25;
-        suggestedPreset = 'classic';
-        reasoning = `Continue steady progress on ${goal.subject}.`;
-      }
-
-      recommendations.push({
-        goalId: goal.id,
-        goalTitle: goal.title,
-        priority,
-        recommendedAction,
-        suggestedDuration,
-        suggestedPreset,
-        reasoning,
-        urgency
-      });
-    }
-
-    // Sort by priority
-    return recommendations.sort((a, b) => b.priority - a.priority);
-  }
-
-  // Get today's tasks
-  static getTodaysTasks(): GoalTask[] {
-    const goals = this.getActiveGoals();
+  if (goal.deadline) {
+    const deadlineDate = new Date(goal.deadline);
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    daysRemaining = Math.ceil((deadlineDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     
-    const tasks: GoalTask[] = [];
-    
-    for (const goal of goals) {
-      for (const task of goal.tasks) {
-        if (task.status !== 'completed' && task.dueDate) {
-          const dueDate = new Date(task.dueDate);
-          dueDate.setHours(0, 0, 0, 0);
-          
-          if (dueDate <= today) {
-            tasks.push(task);
-          }
-        }
+    if (daysRemaining > 0) {
+      const hoursRemaining = goal.targetHours - goal.hoursCompleted;
+      if (hoursRemaining > 0) {
+        recommendedDailyMinutes = Math.ceil((hoursRemaining * 60) / daysRemaining);
+        // Check if on track (current pace vs required pace)
+        isOnTrack = goal.dailyCommitmentMinutes >= recommendedDailyMinutes * 0.9;
       }
+    } else {
+      isOnTrack = progressPercentage >= 100;
     }
-    
-    return tasks;
   }
 
-  // Get next task to work on
-  static getNextTask(goalId?: string): { goal: StudyGoal; task: GoalTask } | null {
-    const goals = goalId 
-      ? this.getGoals().filter(g => g.id === goalId && g.isActive)
-      : this.getActiveGoals();
-    
-    for (const goal of goals) {
-      // First, get tasks that are already in progress
-      const inProgressTask = goal.tasks.find(t => t.status === 'in-progress');
-      if (inProgressTask) {
-        return { goal, task: inProgressTask };
-      }
-      
-      // Then get tasks with nearest due date
-      const pendingTasks = goal.tasks
-        .filter(t => t.status === 'not-started')
-        .sort((a, b) => {
-          if (a.dueDate && b.dueDate) {
-            return a.dueDate.getTime() - b.dueDate.getTime();
-          }
-          if (a.dueDate) return -1;
-          if (b.dueDate) return 1;
-          return 0;
-        });
-      
-      if (pendingTasks.length > 0) {
-        return { goal, task: pendingTasks[0] };
+  return {
+    goalId: goal.id,
+    progressPercentage: Math.min(progressPercentage, 100),
+    tasksCompleted,
+    totalTasks,
+    hoursCompleted: goal.hoursCompleted,
+    targetHours: goal.targetHours,
+    daysRemaining,
+    isOnTrack,
+    recommendedDailyMinutes
+  };
+}
+
+// Get daily recommendation for what to study next
+export function getDailyRecommendation(goals: Goal[]): DailyRecommendation | null {
+  const activeGoals = goals.filter(g => !g.isArchived && !g.completedAt);
+  
+  if (activeGoals.length === 0) return null;
+
+  // Score each goal based on urgency
+  const scoredGoals = activeGoals.map(goal => {
+    const progress = calculateGoalProgress(goal);
+    let score = 0;
+    let urgency: 'critical' | 'high' | 'medium' | 'low' = 'medium';
+    let reason = '';
+
+    // Factor 1: Days remaining (most urgent)
+    if (progress.daysRemaining !== undefined) {
+      if (progress.daysRemaining <= 2) {
+        score += 100;
+        urgency = 'critical';
+        reason = `Only ${progress.daysRemaining} days left!`;
+      } else if (progress.daysRemaining <= 7) {
+        score += 50;
+        urgency = 'high';
+        reason = `${progress.daysRemaining} days until deadline`;
+      } else if (progress.daysRemaining <= 14) {
+        score += 25;
+        urgency = 'medium';
+        reason = `${progress.daysRemaining} days to prepare`;
       }
     }
-    
-    return null;
+
+    // Factor 2: Off-track status
+    if (!progress.isOnTrack) {
+      score += 40;
+      reason = progress.daysRemaining 
+        ? `Behind schedule. Need ${progress.recommendedDailyMinutes} min/day to catch up`
+        : 'Behind schedule';
+    }
+
+    // Factor 3: Priority
+    const priorityScores = { critical: 30, high: 20, medium: 10, low: 5 };
+    score += priorityScores[goal.priority];
+
+    // Factor 4: Progress percentage (prefer goals that are started but not finished)
+    if (progress.progressPercentage > 0 && progress.progressPercentage < 100) {
+      score += 15;
+    }
+
+    return { goal, progress, score, urgency, reason };
+  });
+
+  // Sort by score (highest first)
+  scoredGoals.sort((a, b) => b.score - a.score);
+  
+  const top = scoredGoals[0];
+  if (!top) return null;
+
+  // Determine recommended action type
+  let recommendedAction: ActionType = 'deep-work';
+  const progress = top.progress;
+  
+  if (progress.progressPercentage < 30) {
+    recommendedAction = 'deep-work'; // Start with intensive work
+  } else if (progress.progressPercentage < 70) {
+    recommendedAction = progress.daysRemaining && progress.daysRemaining <= 7 
+      ? 'flashcards' // Crunch time - review mode
+      : 'deep-work';
+  } else {
+    recommendedAction = 'review'; // Final stages - review and polish
   }
+
+  // Find next incomplete task
+  const nextTask = top.goal.tasks.find(t => t.status !== 'completed');
+
+  // Determine recommended duration
+  let recommendedDuration = top.progress.recommendedDailyMinutes;
+  if (recommendedAction === 'flashcards' || recommendedAction === 'review') {
+    recommendedDuration = Math.min(recommendedDuration, 45); // Shorter for review
+  } else if (recommendedAction === 'light-study') {
+    recommendedDuration = Math.min(recommendedDuration, 30);
+  }
+
+  return {
+    goalId: top.goal.id,
+    goalTitle: top.goal.title,
+    urgency: top.urgency,
+    recommendedAction,
+    recommendedDuration,
+    reason: top.reason || 'Continue making progress',
+    nextTask
+  };
+}
+
+// Link a study session to a goal
+export function linkSessionToGoal(
+  goalId: string, 
+  taskId: string | undefined, 
+  durationMinutes: number,
+  taskCompleted: boolean
+): { updatedGoal: Goal | null } {
+  const goals = getGoalsFromStorage();
+  const goal = goals.find(g => g.id === goalId);
+  
+  if (!goal) return { updatedGoal: null };
+
+  // Update hours completed
+  goal.hoursCompleted += durationMinutes / 60;
+
+  // Update task status if specified
+  if (taskId && taskCompleted) {
+    const task = goal.tasks.find(t => t.id === taskId);
+    if (task) {
+      task.status = 'completed';
+      task.completedAt = new Date().toISOString();
+    }
+  }
+
+  // Check if goal is complete
+  const progress = calculateGoalProgress(goal);
+  if (progress.progressPercentage >= 100 && !goal.completedAt) {
+    goal.completedAt = new Date().toISOString();
+  }
+
+  goal.updatedAt = new Date().toISOString();
+  
+  saveGoalsToStorage(goals);
+  
+  return { updatedGoal: goal };
+}
+
+// CRUD operations
+export function getGoalsFromStorage(): Goal[] {
+  if (typeof window === 'undefined') return [];
+  const stored = localStorage.getItem('study-goals');
+  return stored ? JSON.parse(stored) : [];
+}
+
+export function saveGoalsToStorage(goals: Goal[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('study-goals', JSON.stringify(goals));
+}
+
+export function createGoal(goalData: Omit<Goal, 'id' | 'createdAt' | 'updatedAt' | 'isArchived' | 'hoursCompleted'>): Goal {
+  const newGoal: Goal = {
+    ...goalData,
+    id: `goal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    hoursCompleted: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    isArchived: false
+  };
+
+  const goals = getGoalsFromStorage();
+  goals.push(newGoal);
+  saveGoalsToStorage(goals);
+
+  return newGoal;
+}
+
+export function updateGoal(goalId: string, updates: Partial<Goal>): Goal | null {
+  const goals = getGoalsFromStorage();
+  const goalIndex = goals.findIndex(g => g.id === goalId);
+  
+  if (goalIndex === -1) return null;
+
+  goals[goalIndex] = {
+    ...goals[goalIndex],
+    ...updates,
+    updatedAt: new Date().toISOString()
+  };
+
+  saveGoalsToStorage(goals);
+  return goals[goalIndex];
+}
+
+export function deleteGoal(goalId: string): boolean {
+  const goals = getGoalsFromStorage();
+  const filtered = goals.filter(g => g.id !== goalId);
+  
+  if (filtered.length === goals.length) return false;
+  
+  saveGoalsToStorage(filtered);
+  return true;
+}
+
+export function addTaskToGoal(goalId: string, task: Omit<Task, 'id'>): Task | null {
+  const goals = getGoalsFromStorage();
+  const goal = goals.find(g => g.id === goalId);
+  
+  if (!goal) return null;
+
+  const newTask: Task = {
+    ...task,
+    id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  };
+
+  goal.tasks.push(newTask);
+  goal.updatedAt = new Date().toISOString();
+  
+  saveGoalsToStorage(goals);
+  return newTask;
+}
+
+export function updateTask(goalId: string, taskId: string, updates: Partial<Task>): Task | null {
+  const goals = getGoalsFromStorage();
+  const goal = goals.find(g => g.id === goalId);
+  
+  if (!goal) return null;
+
+  const taskIndex = goal.tasks.findIndex(t => t.id === taskId);
+  if (taskIndex === -1) return null;
+
+  goal.tasks[taskIndex] = {
+    ...goal.tasks[taskIndex],
+    ...updates
+  };
+  
+  goal.updatedAt = new Date().toISOString();
+  saveGoalsToStorage(goals);
+  
+  return goal.tasks[taskIndex];
+}
+
+export function deleteTask(goalId: string, taskId: string): boolean {
+  const goals = getGoalsFromStorage();
+  const goal = goals.find(g => g.id === goalId);
+  
+  if (!goal) return false;
+
+  const originalLength = goal.tasks.length;
+  goal.tasks = goal.tasks.filter(t => t.id !== taskId);
+  
+  if (goal.tasks.length === originalLength) return false;
+
+  goal.updatedAt = new Date().toISOString();
+  saveGoalsToStorage(goals);
+  
+  return true;
 }
