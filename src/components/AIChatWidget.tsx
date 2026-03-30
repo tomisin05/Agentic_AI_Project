@@ -3,14 +3,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { MessageCircle, X, Sparkles, Zap, AlertTriangle, Wifi, WifiOff } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
-import dotenv from "dotenv";
-
-dotenv.config();
 
 // ⚠️ SECURITY WARNING: In production, NEVER store API keys in frontend code!
 // This should be stored in a secure backend environment.
-// For demo purposes only - replace with your own key
-const OPENAI_API_KEY = process.env.VITE_OPENAI_API_KEY || "sk-REPLACE_WITH_YOUR_OWN_KEY";
+// In Vite, only variables prefixed with VITE_ are exposed to browser code.
+const OPENAI_API_KEY = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_OPENAI_API_KEY;
 
 export function AIChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
@@ -24,7 +21,7 @@ export function AIChatWidget() {
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [useLocalAI, setUseLocalAI] = useState(false);
+  const [useLocalAI, setUseLocalAI] = useState(!OPENAI_API_KEY);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const coolAILines = [
@@ -125,7 +122,7 @@ export function AIChatWidget() {
   // Try OpenAI API, fallback to local AI
   const getAIResponse = async (userQuestion: string): Promise<string> => {
     // If we've already determined to use local AI, skip API call
-    if (useLocalAI) {
+    if (useLocalAI || !OPENAI_API_KEY) {
       return getLocalAIResponse(userQuestion);
     }
 
